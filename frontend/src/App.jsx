@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api, setToken, setAuthExpiredHandler } from './api.js';
 import Login from './Login.jsx';
 import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
@@ -22,6 +22,8 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [filterVal, setFilterVal] = useState('');
   const [actingRole, setActingRole] = useState('Finance Head');
+  const roleRef = useRef(actingRole);
+  useEffect(() => { roleRef.current = actingRole; }, [actingRole]);
   const [modal, setModal] = useState(null); // {type, id, ...}
   const [toast, setToast] = useState(null);
   const [railOpen, setRailOpen] = useState(false);
@@ -33,7 +35,12 @@ export default function App() {
 
   const refresh = useCallback(async (keys) => {
     const all = ['companies', 'assets', 'blocks', 'units', 'brands', 'users', 'leases', 'sales', 'invoices', 'collections', 'investorUnits', 'disbursals'];
-    const target = keys || all;
+    // module key in the permissions matrix for each db key
+    const moduleOf = { investorUnits: 'investors', disbursals: 'disbursement' };
+    const role = roleRef.current;
+    let target = keys || all;
+    // Only fetch what this role may view (avoids 403s that would otherwise leave tables empty)
+    if (role) target = target.filter((k) => canView(role, moduleOf[k] || k));
     const fetchers = {
       companies: api.companies.list, assets: api.assets.list, blocks: api.blocks.list, units: api.units.list,
       brands: api.brands.list, users: api.users.list, leases: api.leases.list, sales: api.sales.list,
@@ -41,10 +48,13 @@ export default function App() {
       disbursals: api.disbursement.list
     };
     try {
-      const results = await Promise.all(target.map((k) => fetchers[k]()));
+      const results = await Promise.allSettled(target.map((k) => fetchers[k]()));
       setDb((prev) => {
         const next = { ...prev };
-        target.forEach((k, i) => { next[k] = results[i]; });
+        target.forEach((k, i) => {
+          if (results[i].status === 'fulfilled') next[k] = results[i].value;
+          else next[k] = prev[k] && prev[k].length ? prev[k] : []; // forbidden/failed -> keep empty, don't blank others
+        });
         return next;
       });
       try { setPendingDel(await api.deletionRequests.pendingMap()); } catch (e) { /* non-fatal */ }
@@ -60,7 +70,7 @@ export default function App() {
       await refresh();
       setLoading(false);
     })();
-  }, [refresh, authUser]);
+  }, [refresh, authUser, actingRole]);
 
   useEffect(() => { setSearch(''); setFilterVal(''); setRailOpen(false); }, [view]);
 
