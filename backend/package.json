@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "setup-db": "node setup-db.js",
+    "seed": "node seed.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
