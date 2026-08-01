@@ -90,10 +90,19 @@ export default function App() {
           ))}
         </nav>
         <div className="userbox">
-          <label>Acting as</label>
-          <select value={actingRole} onChange={(e) => { setActingRole(e.target.value); notify('Now acting as ' + e.target.value); }}>
-            {ROLES.map((r) => <option key={r}>{r}</option>)}
-          </select>
+          {authUser.isAdmin ? (
+            <>
+              <label>Acting as</label>
+              <select value={actingRole} onChange={(e) => { setActingRole(e.target.value); notify('Now acting as ' + e.target.value); }}>
+                {ROLES.map((r) => <option key={r}>{r}</option>)}
+              </select>
+            </>
+          ) : (
+            <>
+              <label>Signed in as</label>
+              <div className="role-locked">{actingRole}</div>
+            </>
+          )}
         </div>
       </aside>
       <div className="main">
