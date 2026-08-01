@@ -28,10 +28,36 @@ are generated server-side via a `Sequences` table + MERGE, mirroring the origina
 
 ## Setup
 
-### 1. Database (SSMS)
+### 1. Database
 
-Open `backend/sql/schema.sql` in SQL Server Management Studio and run it. It creates the
-`LeasingBillingDB` database and all tables/indexes.
+You have two options.
+
+**Option A — dedicated database (default).** Open `backend/sql/schema.sql` in SSMS and run it.
+It creates the `LeasingBillingDB` database and all tables under `dbo`. Keep `DB_SCHEMA=dbo`.
+
+**Option B — add to an EXISTING shared database (no impact on existing tables).**
+If you want these tables to live inside a database you already use (e.g. alongside another
+app's `dbo.*` tables), the app can install everything under a dedicated `leasing` schema so
+nothing collides:
+
+1. In `.env`, set `DB_DATABASE=<your existing DB>` and `DB_SCHEMA=leasing`.
+2. Run `backend/sql/schema_existing_db.sql` in SSMS **while connected to that database**.
+   It only does `CREATE SCHEMA leasing` + `CREATE TABLE leasing.*` (guarded by
+   `IF OBJECT_ID(...) IS NULL`). It never creates/alters/drops the database or any `dbo` object.
+
+The tables then live as `leasing.Companies`, `leasing.Invoices`, etc., fully isolated from
+your existing `dbo.*` tables. To sanity-check for name collisions beforehand, run:
+
+```sql
+SELECT name FROM sys.tables
+WHERE name IN ('Assets','Blocks','Brands','ChangeLog','Collections','Companies',
+  'Disbursals','InvestorUnitInvestors','InvestorUnits','Invoices','Leases','Sales',
+  'Sequences','Units','Users') AND SCHEMA_NAME(schema_id) = 'leasing';
+```
+
+**Either option, one command:** instead of running the .sql by hand, fill in `.env` and run
+`npm run setup-db` from `backend/`. It picks the right script based on `DB_SCHEMA`, applies it,
+and lists the resulting tables. (In shared-DB mode it will not create or alter the database.)
 
 ### 2. Backend
 

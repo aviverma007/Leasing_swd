@@ -1,12 +1,12 @@
 const express = require('express');
-const { sql, getPool } = require('../db');
+const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, round2 } = require('../lib/helpers');
 const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
     const pool = await getPool();
-    const result = await pool.request().query('SELECT * FROM dbo.Collections ORDER BY CollDate DESC');
+    const result = await pool.request().query(`SELECT * FROM ${SCHEMA}.Collections ORDER BY CollDate DESC`);
     res.json(result.recordset.map(r => ({
       id: r.Id, no: r.No, invoiceId: r.InvoiceId, date: r.CollDate.toISOString().slice(0, 10),
       amount: Number(r.Amount), tdsPct: Number(r.TdsPct), tds: Number(r.Tds), instrument: r.Instrument, ref: r.Ref
@@ -26,7 +26,7 @@ router.post('/', async (req, res) => {
       .input('id', sql.VarChar(40), id).input('no', sql.VarChar(20), no).input('invoiceId', sql.VarChar(40), invoiceId)
       .input('date', sql.Date, date).input('amount', sql.Decimal(18, 2), amount).input('tdsPct', sql.Decimal(9, 3), tdsPct || 0)
       .input('tds', sql.Decimal(18, 2), tds).input('instrument', sql.VarChar(20), instrument).input('ref', sql.NVarChar(100), ref || '')
-      .query(`INSERT INTO dbo.Collections (Id,No,InvoiceId,CollDate,Amount,TdsPct,Tds,Instrument,Ref)
+      .query(`INSERT INTO ${SCHEMA}.Collections (Id,No,InvoiceId,CollDate,Amount,TdsPct,Tds,Instrument,Ref)
         VALUES (@id,@no,@invoiceId,@date,@amount,@tdsPct,@tds,@instrument,@ref)`);
     res.json({ id, no });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const pool = await getPool();
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query('DELETE FROM dbo.Collections WHERE Id=@id');
+    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Collections WHERE Id=@id`);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

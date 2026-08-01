@@ -7,6 +7,11 @@ const path = require('path');
 const sql = require('mssql');
 
 const targetDb = process.env.DB_DATABASE || 'LeasingBillingDB';
+const schema = process.env.DB_SCHEMA || 'dbo';
+// When using a non-dbo schema, we assume the database ALREADY exists (shared DB)
+// and apply the schema-qualified script that does not CREATE DATABASE.
+const useExistingDb = schema !== 'dbo';
+const schemaFile = useExistingDb ? 'schema_existing_db.sql' : 'schema.sql';
 
 const baseConfig = {
   server: process.env.DB_SERVER || '192.168.66.33',
@@ -36,42 +41,48 @@ async function run() {
     process.exit(1);
   }
 
-  // 1) Connect to the server on the master DB and create the target DB if needed
-  let master;
-  try {
-    master = await new sql.ConnectionPool({ ...baseConfig, database: 'master' }).connect();
-    console.log('✓ Connected to server (master).');
-  } catch (e) {
-    console.error('✗ Could not connect to the SQL Server. Check that:');
-    console.error('  - the server/host and port are correct and reachable from this machine');
-    console.error('  - SQL authentication is enabled and the user/password are valid');
-    console.error('  - TCP/IP is enabled in SQL Server Configuration Manager');
-    console.error('\nUnderlying error:', e.message);
-    process.exit(1);
-  }
+  console.log(`Schema:   ${schema}${useExistingDb ? '  (adding to an EXISTING shared database — dbo.* tables are untouched)' : ''}\n`);
 
-  try {
-    await master.request().query(
-      `IF DB_ID('${targetDb}') IS NULL BEGIN CREATE DATABASE [${targetDb}]; END`
-    );
-    console.log(`✓ Database "${targetDb}" is present (created if it did not exist).`);
-  } catch (e) {
-    console.error(`✗ Failed to create database "${targetDb}":`, e.message);
+  // 1) In dedicated-DB mode, create the target DB if missing.
+  //    In shared-DB mode (DB_SCHEMA != dbo), we do NOT create or alter the database.
+  if (!useExistingDb) {
+    let master;
+    try {
+      master = await new sql.ConnectionPool({ ...baseConfig, database: 'master' }).connect();
+      console.log('✓ Connected to server (master).');
+    } catch (e) {
+      console.error('✗ Could not connect to the SQL Server. Check that:');
+      console.error('  - the server/host and port are correct and reachable from this machine');
+      console.error('  - SQL authentication is enabled and the user/password are valid');
+      console.error('  - TCP/IP is enabled in SQL Server Configuration Manager');
+      console.error('\nUnderlying error:', e.message);
+      process.exit(1);
+    }
+    try {
+      await master.request().query(
+        `IF DB_ID('${targetDb}') IS NULL BEGIN CREATE DATABASE [${targetDb}]; END`
+      );
+      console.log(`✓ Database "${targetDb}" is present (created if it did not exist).`);
+    } catch (e) {
+      console.error(`✗ Failed to create database "${targetDb}":`, e.message);
+      await master.close();
+      process.exit(1);
+    }
     await master.close();
-    process.exit(1);
+  } else {
+    console.log(`• Shared-DB mode: will NOT create/alter the database. Adding [${schema}] schema + its tables only.`);
   }
-  await master.close();
 
-  // 2) Connect to the target DB and run schema.sql batch-by-batch
-  const schemaPath = path.join(__dirname, 'sql', 'schema.sql');
-  let schema = fs.readFileSync(schemaPath, 'utf8');
-  // strip the CREATE DATABASE / USE prologue — we're already connected to the right DB
-  schema = schema.replace(/IF DB_ID\([^)]*\)[\s\S]*?USE \[?LeasingBillingDB\]?;?/i, '');
+  // 2) Connect to the target DB and run the schema file batch-by-batch
+  const schemaPath = path.join(__dirname, 'sql', schemaFile);
+  let schemaSql = fs.readFileSync(schemaPath, 'utf8');
+  // strip any CREATE DATABASE / USE prologue — we're already connected to the right DB
+  schemaSql = schemaSql.replace(/IF DB_ID\([^)]*\)[\s\S]*?USE \[?LeasingBillingDB\]?;?/i, '');
 
   const pool = await new sql.ConnectionPool({ ...baseConfig, database: targetDb }).connect();
-  console.log(`✓ Connected to "${targetDb}". Applying schema...`);
+  console.log(`✓ Connected to "${targetDb}". Applying ${schemaFile}...`);
 
-  const batches = splitBatches(schema);
+  const batches = splitBatches(schemaSql);
   let applied = 0;
   for (const batch of batches) {
     try {
@@ -85,12 +96,15 @@ async function run() {
   }
   console.log(`✓ Schema applied (${applied} batch(es) processed).`);
 
-  // 3) Verify: list the tables we expect
+  // 3) Verify: list only THIS app's tables (in the configured schema)
   const tables = await pool.request().query(
-    `SELECT name FROM sys.tables ORDER BY name`
+    `SELECT t.name FROM sys.tables t
+     JOIN sys.schemas s ON s.schema_id = t.schema_id
+     WHERE s.name = '${schema}'
+     ORDER BY t.name`
   );
-  console.log('\nTables now in the database:');
-  tables.recordset.forEach(t => console.log('   -', t.name));
+  console.log(`\n[${schema}] tables now present (${tables.recordset.length}):`);
+  tables.recordset.forEach(t => console.log(`   - ${schema}.${t.name}`));
 
   await pool.close();
   console.log('\n✓ Setup complete. Start the API with:  npm start');

@@ -1,5 +1,5 @@
 const express = require('express');
-const { getPool } = require('../db');
+const { getPool, SCHEMA } = require('../db');
 const router = express.Router();
 
 const GL = {
@@ -10,9 +10,9 @@ const GL = {
 router.get('/summary', async (req, res) => {
   try {
     const pool = await getPool();
-    const disb = await pool.request().query(`SELECT ISNULL(SUM(NetPayable),0) net, ISNULL(SUM(TdsAmt),0) tds, COUNT(*) cnt FROM dbo.Disbursals WHERE Status<>'Void'`);
-    const holds = await pool.request().query(`SELECT COUNT(*) cnt FROM dbo.Leases WHERE OnHold=1`);
-    const sd = await pool.request().query(`SELECT ISNULL(SUM(Deposit),0) total FROM dbo.Leases WHERE Status='Active'`);
+    const disb = await pool.request().query(`SELECT ISNULL(SUM(NetPayable),0) net, ISNULL(SUM(TdsAmt),0) tds, COUNT(*) cnt FROM ${SCHEMA}.Disbursals WHERE Status<>'Void'`);
+    const holds = await pool.request().query(`SELECT COUNT(*) cnt FROM ${SCHEMA}.Leases WHERE OnHold=1`);
+    const sd = await pool.request().query(`SELECT ISNULL(SUM(Deposit),0) total FROM ${SCHEMA}.Leases WHERE Status='Active'`);
     res.json({
       totalNet: Number(disb.recordset[0].net), totalTds: Number(disb.recordset[0].tds), voucherCount: disb.recordset[0].cnt,
       holdLeases: holds.recordset[0].cnt, securityDeposit: Number(sd.recordset[0].total)
@@ -23,8 +23,8 @@ router.get('/summary', async (req, res) => {
 router.get('/sap-entries', async (req, res) => {
   try {
     const pool = await getPool();
-    const invs = await pool.request().query('SELECT No, Type, Total FROM dbo.Invoices');
-    const disbs = await pool.request().query(`SELECT No, NetPayable, TdsAmt FROM dbo.Disbursals WHERE Status='Processed'`);
+    const invs = await pool.request().query(`SELECT No, Type, Total FROM ${SCHEMA}.Invoices`);
+    const disbs = await pool.request().query(`SELECT No, NetPayable, TdsAmt FROM ${SCHEMA}.Disbursals WHERE Status='Processed'`);
     const rows = [];
     invs.recordset.forEach(i => rows.push({ gl: (GL[i.Type] || '410900 Other Income').split(' ')[0], doc: i.No, type: i.Type + ' income', amount: Number(i.Total) }));
     disbs.recordset.forEach(d => {
@@ -38,7 +38,7 @@ router.get('/sap-entries', async (req, res) => {
 router.get('/log', async (req, res) => {
   try {
     const pool = await getPool();
-    const result = await pool.request().query('SELECT TOP 50 * FROM dbo.ChangeLog ORDER BY LogDate DESC');
+    const result = await pool.request().query(`SELECT TOP 50 * FROM ${SCHEMA}.ChangeLog ORDER BY LogDate DESC`);
     res.json(result.recordset.map(r => ({ id: r.Id, date: r.LogDate, type: r.Type, ref: r.Ref, detail: r.Detail, by: r.ByUser })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

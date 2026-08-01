@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { SCHEMA } = require('../db');
 
 function uid() {
   return Date.now().toString(36) + crypto.randomBytes(4).toString('hex').slice(0, 6);
@@ -40,7 +41,7 @@ async function nextNo(pool, sql, prefix) {
   const request = pool.request();
   request.input('p', sql.VarChar(10), prefix);
   const result = await request.query(
-    `MERGE dbo.Sequences AS target
+    `MERGE ${SCHEMA}.Sequences AS target
      USING (SELECT @p AS Prefix) AS src
      ON target.Prefix = src.Prefix
      WHEN MATCHED THEN UPDATE SET LastVal = target.LastVal + 1

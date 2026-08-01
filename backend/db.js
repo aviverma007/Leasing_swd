@@ -14,6 +14,12 @@ const config = {
   pool: { max: 10, min: 0, idleTimeoutMillis: 30000 }
 };
 
+// Schema all app tables live under. Default 'dbo'. Set DB_SCHEMA=leasing in .env
+// to isolate these tables from your existing dbo.* tables in a shared database.
+const SCHEMA = process.env.DB_SCHEMA || 'dbo';
+// tbl('Invoices') -> 'dbo.Invoices' or 'leasing.Invoices'
+function tbl(name) { return `${SCHEMA}.${name}`; }
+
 let poolPromise;
 function getPool() {
   if (!poolPromise) {
@@ -32,4 +38,4 @@ function getPool() {
   return poolPromise;
 }
 
-module.exports = { sql, getPool };
+module.exports = { sql, getPool, SCHEMA, tbl };

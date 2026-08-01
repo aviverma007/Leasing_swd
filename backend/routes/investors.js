@@ -1,11 +1,11 @@
 const express = require('express');
-const { sql, getPool } = require('../db');
+const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, iso } = require('../lib/helpers');
 const router = express.Router();
 
 async function mapInvestorUnit(pool, r) {
   const invRows = await pool.request().input('iv', sql.VarChar(40), r.Id).query(
-    'SELECT * FROM dbo.InvestorUnitInvestors WHERE InvestorUnitId=@iv ORDER BY Idx');
+    `SELECT * FROM ${SCHEMA}.InvestorUnitInvestors WHERE InvestorUnitId=@iv ORDER BY Idx`);
   return {
     id: r.Id, code: r.Code, unitId: r.UnitId, floor: r.Floor, status: r.Status,
     maker: r.Maker, checker: r.Checker, remarks: r.Remarks, createdAt: iso(new Date(r.CreatedAt)),
@@ -20,7 +20,7 @@ async function mapInvestorUnit(pool, r) {
 router.get('/', async (req, res) => {
   try {
     const pool = await getPool();
-    const result = await pool.request().query('SELECT * FROM dbo.InvestorUnits ORDER BY Code DESC');
+    const result = await pool.request().query(`SELECT * FROM ${SCHEMA}.InvestorUnits ORDER BY Code DESC`);
     const out = [];
     for (const r of result.recordset) out.push(await mapInvestorUnit(pool, r));
     res.json(out);
@@ -40,7 +40,7 @@ router.post('/', async (req, res) => {
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
       .input('unitId', sql.VarChar(40), unitId).input('floor', sql.Int, floor || 0)
       .input('maker', sql.NVarChar(100), actingRole || '').input('created', sql.Date, iso(new Date()))
-      .query(`INSERT INTO dbo.InvestorUnits (Id,Code,UnitId,Floor,Status,Maker,Checker,Remarks,CreatedAt)
+      .query(`INSERT INTO ${SCHEMA}.InvestorUnits (Id,Code,UnitId,Floor,Status,Maker,Checker,Remarks,CreatedAt)
         VALUES (@id,@code,@unitId,@floor,'Pending',@maker,'','',@created)`);
 
     for (let i = 0; i < investors.length; i++) {
@@ -50,10 +50,10 @@ router.post('/', async (req, res) => {
         .input('disb', sql.Decimal(9, 3), x.disbursePct || 0).input('start', sql.Date, x.start || null)
         .input('gst', sql.Bit, x.gst ? 1 : 0).input('nri', sql.Bit, x.nri ? 1 : 0)
         .input('bank', sql.NVarChar(150), x.bankName || '').input('acc', sql.NVarChar(60), x.acc || '').input('ifsc', sql.NVarChar(20), x.ifsc || '')
-        .query(`INSERT INTO dbo.InvestorUnitInvestors (Id,InvestorUnitId,Idx,Name,AreaPct,DisbursePct,StartDate,Gst,Nri,BankName,Acc,Ifsc)
+        .query(`INSERT INTO ${SCHEMA}.InvestorUnitInvestors (Id,InvestorUnitId,Idx,Name,AreaPct,DisbursePct,StartDate,Gst,Nri,BankName,Acc,Ifsc)
           VALUES (@id,@iv,@idx,@name,@area,@disb,@start,@gst,@nri,@bank,@acc,@ifsc)`);
     }
-    const row = await pool.request().input('id', sql.VarChar(40), id).query('SELECT * FROM dbo.InvestorUnits WHERE Id=@id');
+    const row = await pool.request().input('id', sql.VarChar(40), id).query(`SELECT * FROM ${SCHEMA}.InvestorUnits WHERE Id=@id`);
     res.json(await mapInvestorUnit(pool, row.recordset[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -67,8 +67,8 @@ router.put('/:id', async (req, res) => {
 
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('floor', sql.Int, floor || 0)
       .input('maker', sql.NVarChar(100), actingRole || '')
-      .query(`UPDATE dbo.InvestorUnits SET Floor=@floor, Status='Pending', Maker=@maker, Checker='' WHERE Id=@id`);
-    await pool.request().input('iv', sql.VarChar(40), req.params.id).query('DELETE FROM dbo.InvestorUnitInvestors WHERE InvestorUnitId=@iv');
+      .query(`UPDATE ${SCHEMA}.InvestorUnits SET Floor=@floor, Status='Pending', Maker=@maker, Checker='' WHERE Id=@id`);
+    await pool.request().input('iv', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.InvestorUnitInvestors WHERE InvestorUnitId=@iv`);
     for (let i = 0; i < investors.length; i++) {
       const x = investors[i];
       await pool.request().input('id', sql.VarChar(40), uid()).input('iv', sql.VarChar(40), req.params.id).input('idx', sql.Int, i)
@@ -76,10 +76,10 @@ router.put('/:id', async (req, res) => {
         .input('disb', sql.Decimal(9, 3), x.disbursePct || 0).input('start', sql.Date, x.start || null)
         .input('gst', sql.Bit, x.gst ? 1 : 0).input('nri', sql.Bit, x.nri ? 1 : 0)
         .input('bank', sql.NVarChar(150), x.bankName || '').input('acc', sql.NVarChar(60), x.acc || '').input('ifsc', sql.NVarChar(20), x.ifsc || '')
-        .query(`INSERT INTO dbo.InvestorUnitInvestors (Id,InvestorUnitId,Idx,Name,AreaPct,DisbursePct,StartDate,Gst,Nri,BankName,Acc,Ifsc)
+        .query(`INSERT INTO ${SCHEMA}.InvestorUnitInvestors (Id,InvestorUnitId,Idx,Name,AreaPct,DisbursePct,StartDate,Gst,Nri,BankName,Acc,Ifsc)
           VALUES (@id,@iv,@idx,@name,@area,@disb,@start,@gst,@nri,@bank,@acc,@ifsc)`);
     }
-    const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query('SELECT * FROM dbo.InvestorUnits WHERE Id=@id');
+    const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.InvestorUnits WHERE Id=@id`);
     res.json(await mapInvestorUnit(pool, row.recordset[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -90,7 +90,7 @@ router.post('/:id/approve', async (req, res) => {
     const { actingRole } = req.body;
     if (!['Finance Head', 'Center/Portfolio Head'].includes(actingRole)) return res.status(403).json({ error: 'Only Finance/Portfolio Head can approve.' });
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('checker', sql.NVarChar(100), actingRole)
-      .query(`UPDATE dbo.InvestorUnits SET Status='Approved', Checker=@checker WHERE Id=@id`);
+      .query(`UPDATE ${SCHEMA}.InvestorUnits SET Status='Approved', Checker=@checker WHERE Id=@id`);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -99,9 +99,9 @@ router.delete('/:id', async (req, res) => {
   try {
     const pool = await getPool();
     const chk = await pool.request().input('id', sql.VarChar(40), req.params.id).query(
-      `SELECT COUNT(*) cnt FROM dbo.Disbursals WHERE InvestorUnitId=@id AND Status<>'Void'`);
+      `SELECT COUNT(*) cnt FROM ${SCHEMA}.Disbursals WHERE InvestorUnitId=@id AND Status<>'Void'`);
     if (chk.recordset[0].cnt > 0) return res.status(400).json({ error: "Can't delete: disbursals exist." });
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query('DELETE FROM dbo.InvestorUnits WHERE Id=@id');
+    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.InvestorUnits WHERE Id=@id`);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

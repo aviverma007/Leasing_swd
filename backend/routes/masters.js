@@ -1,5 +1,5 @@
 const express = require('express');
-const { sql, getPool } = require('../db');
+const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo } = require('../lib/helpers');
 
 // Table/field maps for each master entity
@@ -43,7 +43,7 @@ function router(entityKey) {
   r.get('/', async (req, res) => {
     try {
       const pool = await getPool();
-      const result = await pool.request().query(`SELECT * FROM dbo.${ent.table} ORDER BY Code`);
+      const result = await pool.request().query(`SELECT * FROM ${SCHEMA}.${ent.table} ORDER BY Code`);
       res.json(result.recordset.map(ent.map));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -73,8 +73,8 @@ function router(entityKey) {
         colNames.push(col);
         values.push(`@${param}`);
       });
-      await request.query(`INSERT INTO dbo.${ent.table} (${colNames.join(',')}) VALUES (${values.join(',')})`);
-      const row = await pool.request().input('id', sql.VarChar(40), id).query(`SELECT * FROM dbo.${ent.table} WHERE Id=@id`);
+      await request.query(`INSERT INTO ${SCHEMA}.${ent.table} (${colNames.join(',')}) VALUES (${values.join(',')})`);
+      const row = await pool.request().input('id', sql.VarChar(40), id).query(`SELECT * FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
       res.json(ent.map(row.recordset[0]));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -97,8 +97,8 @@ function router(entityKey) {
         request.input(param, body[key] ?? null);
         return `${col}=@${param}`;
       });
-      await request.query(`UPDATE dbo.${ent.table} SET ${sets.join(',')} WHERE Id=@id`);
-      const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM dbo.${ent.table} WHERE Id=@id`);
+      await request.query(`UPDATE ${SCHEMA}.${ent.table} SET ${sets.join(',')} WHERE Id=@id`);
+      const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
       res.json(ent.map(row.recordset[0]));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -106,7 +106,7 @@ function router(entityKey) {
   r.delete('/:id', async (req, res) => {
     try {
       const pool = await getPool();
-      await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM dbo.${ent.table} WHERE Id=@id`);
+      await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

@@ -1,5 +1,5 @@
 const express = require('express');
-const { sql, getPool } = require('../db');
+const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, monthRange, irnHex, round2 } = require('../lib/helpers');
 const { genLeaseInvoices } = require('../lib/billing');
 const router = express.Router();
@@ -22,8 +22,8 @@ router.get('/', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
-      SELECT i.*, ISNULL(c.paid,0) AS Paid FROM dbo.Invoices i
-      OUTER APPLY (SELECT SUM(Amount) AS paid FROM dbo.Collections WHERE InvoiceId=i.Id) c
+      SELECT i.*, ISNULL(c.paid,0) AS Paid FROM ${SCHEMA}.Invoices i
+      OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
       ORDER BY i.DueDate DESC`);
     res.json(result.recordset.map(r => mapInvoice(r, r.Paid)));
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -36,10 +36,10 @@ router.post('/generate', async (req, res) => {
     const { ym, scope } = req.body; // scope: 'all' | leaseId
     let leases;
     if (scope === 'all') {
-      const r = await pool.request().query(`SELECT Id FROM dbo.Leases WHERE Status='Active' AND OnHold=0`);
+      const r = await pool.request().query(`SELECT Id FROM ${SCHEMA}.Leases WHERE Status='Active' AND OnHold=0`);
       leases = r.recordset.map(x => x.Id);
     } else {
-      const r = await pool.request().input('id', sql.VarChar(40), scope).query(`SELECT Id FROM dbo.Leases WHERE Id=@id AND OnHold=0`);
+      const r = await pool.request().input('id', sql.VarChar(40), scope).query(`SELECT Id FROM ${SCHEMA}.Leases WHERE Id=@id AND OnHold=0`);
       leases = r.recordset.map(x => x.Id);
     }
     let count = 0;
@@ -54,7 +54,7 @@ router.post('/adhoc', async (req, res) => {
     const pool = await getPool();
     const { leaseId, ym, desc, amount, gstPct } = req.body;
     if (!amount) return res.status(400).json({ error: 'Enter ad-hoc amount.' });
-    const leaseRow = await pool.request().input('id', sql.VarChar(40), leaseId).query('SELECT * FROM dbo.Leases WHERE Id=@id');
+    const leaseRow = await pool.request().input('id', sql.VarChar(40), leaseId).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
     const lease = leaseRow.recordset[0];
     if (!lease) return res.status(400).json({ error: 'Lease not found' });
     const gstAmt = round2(amount * (gstPct || 0) / 100);
@@ -68,7 +68,7 @@ router.post('/adhoc', async (req, res) => {
       .input('ym', sql.Char(7), ym).input('desc', sql.NVarChar(300), desc || 'Ad-hoc charge').input('amount', sql.Decimal(18, 2), amount)
       .input('gstPct', sql.Decimal(9, 3), gstPct || 0).input('gstAmt', sql.Decimal(18, 2), gstAmt).input('total', sql.Decimal(18, 2), total)
       .input('due', sql.Date, due).input('irn', sql.VarChar(64), irnHex())
-      .query(`INSERT INTO dbo.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,Total,DueDate,Irn,Status)
+      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,Total,DueDate,Irn,Status)
         VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@total,@due,@irn,'Unpaid')`);
     res.json({ id, no });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -77,8 +77,8 @@ router.post('/adhoc', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const pool = await getPool();
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query('DELETE FROM dbo.Collections WHERE InvoiceId=@id');
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query('DELETE FROM dbo.Invoices WHERE Id=@id');
+    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Collections WHERE InvoiceId=@id`);
+    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Invoices WHERE Id=@id`);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
