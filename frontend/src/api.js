@@ -1,7 +1,18 @@
 const BASE = '/api';
+const TOKEN_KEY = 'scoopsense_token';
 
-let authToken = null;
-export function setToken(t) { authToken = t; }
+// Restore any saved token on load (survives page refresh; cleared when the tab closes)
+let authToken = (() => {
+  try { return sessionStorage.getItem(TOKEN_KEY) || null; } catch (e) { return null; }
+})();
+
+export function setToken(t) {
+  authToken = t;
+  try {
+    if (t) sessionStorage.setItem(TOKEN_KEY, t);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch (e) { /* storage unavailable — fall back to in-memory only */ }
+}
 export function getToken() { return authToken; }
 
 async function req(method, path, body) {

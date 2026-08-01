@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { api, setToken, setAuthExpiredHandler } from './api.js';
+import { api, setToken, getToken, setAuthExpiredHandler } from './api.js';
 import Login from './Login.jsx';
 import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
 import {
@@ -93,12 +93,31 @@ export default function App() {
 
   useEffect(() => {
     setAuthExpiredHandler(() => {
+      setToken(null);
       setAuthUser(null);
       setDb(EMPTY_DB);
       setView('dashboard');
     });
   }, []);
 
+  // On first load, if a token was saved (e.g. after a refresh), validate it and restore the session
+  const [restoring, setRestoring] = useState(true);
+  useEffect(() => {
+    (async () => {
+      if (getToken() && !authUser) {
+        try {
+          const { user } = await api.auth.me();
+          setAuthUser(user);
+          setActingRole(user.isAdmin ? 'Admin' : (user.role || 'Manager'));
+        } catch (e) {
+          setToken(null); // token invalid/expired — force fresh login
+        }
+      }
+      setRestoring(false);
+    })();
+  }, []); // eslint-disable-line
+
+  if (restoring) return <div className="login-wrap"><div style={{ color: '#fff' }}>Loading…</div></div>;
   if (!authUser) return <Login onLogin={onLogin} />;
 
   const page = PAGES[view];
