@@ -36,6 +36,23 @@ const ENTITIES = {
   }
 };
 
+// Columns that must be bound as numbers (SQL Server rejects strings for these)
+const INT_COLS = new Set(['TotalFloors', 'Floor']);
+const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea']);
+
+// Bind a value with the correct SQL type; empty/blank numerics become NULL, not ''
+function bindValue(request, param, col, value) {
+  if (INT_COLS.has(col)) {
+    const n = value === '' || value === null || value === undefined ? null : parseInt(value, 10);
+    request.input(param, sql.Int, Number.isNaN(n) ? null : n);
+  } else if (DEC_COLS.has(col)) {
+    const n = value === '' || value === null || value === undefined ? null : parseFloat(value);
+    request.input(param, sql.Decimal(18, 2), Number.isNaN(n) ? null : n);
+  } else {
+    request.input(param, value ?? null);
+  }
+}
+
 function router(entityKey) {
   const ent = ENTITIES[entityKey];
   const r = express.Router();
@@ -69,7 +86,7 @@ function router(entityKey) {
       ent.cols.forEach((col, i) => {
         const key = fieldKeyMap[col];
         const param = `c${i}`;
-        request.input(param, body[key] ?? null);
+        bindValue(request, param, col, body[key]);
         colNames.push(col);
         values.push(`@${param}`);
       });
@@ -94,7 +111,7 @@ function router(entityKey) {
       const sets = ent.cols.map((col, i) => {
         const key = fieldKeyMap[col];
         const param = `c${i}`;
-        request.input(param, body[key] ?? null);
+        bindValue(request, param, col, body[key]);
         return `${col}=@${param}`;
       });
       await request.query(`UPDATE ${SCHEMA}.${ent.table} SET ${sets.join(',')} WHERE Id=@id`);
