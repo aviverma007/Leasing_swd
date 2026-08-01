@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "setup-db": "node setup-db.js",
     "seed": "node seed.js",
-    "test-entries": "node test-entries.js"
+    "test-entries": "node test-entries.js",
+    "test-full": "node test-entries-full.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
