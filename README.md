@@ -78,7 +78,24 @@ DB_USER=sa
 DB_PASSWORD=YourPassword
 DB_PORT=1433
 PORT=5096
+DB_SCHEMA=dbo
+
+# Login / auth
+ADMIN_ID=admin
+ADMIN_PASSWORD=set-your-admin-password
+JWT_SECRET=long-random-string
 ```
+
+## Login & users
+
+- The app opens on a **login page**. Nothing loads until you sign in.
+- **Admin** signs in with `ADMIN_ID` / `ADMIN_PASSWORD` from `.env` (not stored in the
+  database). Only the admin sees the **User Master** menu.
+- **Regular users** are created inside the app under User Master (admin only). Each user's
+  password is set there and stored **bcrypt-hashed** in `leasing.Users`. They log in with
+  their email + that password.
+- Editing a user and leaving the password field blank keeps their existing password.
+- Tokens are JWTs signed with `JWT_SECRET`, valid 12 hours.
 
 The connection uses `encrypt: false` + `trustServerCertificate: true` for older internal
 SQL Server instances (same convention as the other SWD apps).

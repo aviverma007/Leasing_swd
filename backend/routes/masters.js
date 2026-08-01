@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo } = require('../lib/helpers');
 
@@ -75,6 +76,10 @@ function router(entityKey) {
       const id = uid();
       const code = await nextNo(pool, sql, ent.prefix);
       const body = req.body || {};
+      // Hash the password before storing (users only)
+      if (entityKey === 'users' && body.password) {
+        body.password = await bcrypt.hash(String(body.password), 10);
+      }
       const request = pool.request();
       request.input('id', sql.VarChar(40), id);
       request.input('code', sql.VarChar(20), code);
@@ -104,6 +109,15 @@ function router(entityKey) {
     try {
       const pool = await getPool();
       const body = req.body || {};
+      // Users: if a new password is supplied, hash it; if blank, don't touch the stored password
+      let cols = ent.cols;
+      if (entityKey === 'users') {
+        if (body.password) {
+          body.password = await bcrypt.hash(String(body.password), 10);
+        } else {
+          cols = ent.cols.filter(c => c !== 'Password');
+        }
+      }
       const request = pool.request();
       request.input('id', sql.VarChar(40), req.params.id);
       const fieldKeyMap = {
@@ -112,7 +126,7 @@ function router(entityKey) {
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active'
       };
-      const sets = ent.cols.map((col, i) => {
+      const sets = cols.map((col, i) => {
         const key = fieldKeyMap[col];
         const param = `c${i}`;
         bindValue(request, param, col, body[key]);

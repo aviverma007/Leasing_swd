@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { api } from './api.js';
+import { api, setToken } from './api.js';
+import Login from './Login.jsx';
 import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
 import {
   money, money0, fmtDate, ymLabel, curYM, addMonths, nameOf, findById, toCSV, download,
@@ -12,6 +13,7 @@ const EMPTY_DB = {
 };
 
 export default function App() {
+  const [authUser, setAuthUser] = useState(null); // null = not logged in
   const [db, setDb] = useState(EMPTY_DB);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('dashboard');
@@ -49,14 +51,29 @@ export default function App() {
   }, [notify]);
 
   useEffect(() => {
+    if (!authUser) return;
     (async () => {
       setLoading(true);
       await refresh();
       setLoading(false);
     })();
-  }, [refresh]);
+  }, [refresh, authUser]);
 
   useEffect(() => { setSearch(''); setFilterVal(''); setRailOpen(false); }, [view]);
+
+  const onLogin = (user) => {
+    setAuthUser(user);
+    // Admins get Finance-Head-level approval powers by default; others use their own role
+    setActingRole(user.isAdmin ? 'Finance Head' : (user.role || 'Manager'));
+  };
+  const onLogout = () => {
+    setToken(null);
+    setAuthUser(null);
+    setDb(EMPTY_DB);
+    setView('dashboard');
+  };
+
+  if (!authUser) return <Login onLogin={onLogin} />;
 
   const page = PAGES[view];
 
@@ -65,7 +82,7 @@ export default function App() {
       <aside className={`rail${railOpen ? ' show' : ''}`}>
         <div className="brand"><div className="logo">S</div><div><h1>ScoopSense</h1><span>Leasing &amp; Billing</span></div></div>
         <nav className="nav">
-          {NAV.map((n, i) => n.grp && !n.v ? <div className="grp" key={i}>{n.grp}</div> : (
+          {NAV.filter((n) => n.v !== 'users' || authUser.isAdmin).map((n, i) => n.grp && !n.v ? <div className="grp" key={i}>{n.grp}</div> : (
             <a key={n.v} className={n.v === view ? 'active' : ''} onClick={() => setView(n.v)}>
               {n.label}
               {db[n.v] && <span className="cnt">{db[n.v].length}</span>}
@@ -86,6 +103,10 @@ export default function App() {
           </div>
           <div className="tt"><h2>{page.t}</h2><p>{page.s}</p></div>
           <PageAction view={view} setModal={setModal} db={db} />
+          <div className="topbar-user">
+            <div className="who"><b>{authUser.email}</b>{authUser.isAdmin ? 'Admin' : authUser.role}</div>
+            <button className="btn btn-ghost btn-sm" onClick={onLogout}>Sign out</button>
+          </div>
         </div>
         <div className="wrap">
           {loading ? <div className="empty"><p>Loading…</p></div> : (

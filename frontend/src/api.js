@@ -1,9 +1,16 @@
 const BASE = '/api';
 
+let authToken = null;
+export function setToken(t) { authToken = t; }
+export function getToken() { return authToken; }
+
 async function req(method, path, body) {
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
   const res = await fetch(BASE + path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await res.json().catch(() => ({}));
@@ -20,6 +27,10 @@ const crud = (path) => ({
 
 export const api = {
   health: () => req('GET', '/health'),
+  auth: {
+    login: (username, password) => req('POST', '/auth/login', { username, password }),
+    me: () => req('GET', '/auth/me')
+  },
   companies: crud('/companies'),
   assets: crud('/assets'),
   blocks: crud('/blocks'),

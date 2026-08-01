@@ -17,6 +17,9 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// auth
+app.use('/api/auth', require('./routes/auth'));
+
 // master data (generic CRUD)
 app.use('/api/companies', mastersRouter('companies'));
 app.use('/api/assets', mastersRouter('assets'));
