@@ -145,3 +145,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal);bo
 /* locked role (non-admin users) */
 .role-locked{width:100%;background:var(--rail-hi);border:1px solid rgba(255,255,255,.1);color:#E8EDF5;padding:8px 10px;border-radius:7px;font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
 .role-locked::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--teal)}
+
+/* alert count badge (pending deletions) */
+.nav a .cnt.alert{background:var(--red);color:#fff;font-weight:600}

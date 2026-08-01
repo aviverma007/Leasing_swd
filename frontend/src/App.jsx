@@ -102,6 +102,7 @@ export default function App() {
   if (!authUser) return <Login onLogin={onLogin} />;
 
   const page = PAGES[view];
+  const pendingDelCount = Object.values(pendingDel || {}).reduce((s, arr) => s + (arr ? arr.length : 0), 0);
 
   return (
     <div className="app">
@@ -111,7 +112,9 @@ export default function App() {
           {NAV.filter((n) => !n.v || canView(actingRole, n.v)).map((n, i) => n.grp && !n.v ? <div className="grp" key={i}>{n.grp}</div> : (
             <a key={n.v} className={n.v === view ? 'active' : ''} onClick={() => setView(n.v)}>
               {n.label}
-              {db[n.v] && <span className="cnt">{db[n.v].length}</span>}
+              {n.v === 'deletions'
+                ? (pendingDelCount > 0 && <span className="cnt alert">{pendingDelCount}</span>)
+                : (db[n.v] && <span className="cnt">{db[n.v].length}</span>)}
             </a>
           ))}
         </nav>
@@ -481,7 +484,8 @@ function UnitStatusPill({ s }) {
 }
 
 /* ===================== LEASES ===================== */
-function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditView }) {
+function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditView, pendingDel }) {
+  const pendingIds = new Set((pendingDel && pendingDel.leases) || []);
   const rows = db.leases.filter((l) => !search || [nameOf(db.brands, l.brandId), nameOf(db.units, l.unitId), l.code].join(' ').toLowerCase().includes(search.toLowerCase()));
   const release = async (id) => {
     try { await api.leases.release(id); await refresh(['leases']); notify('Lease released from hold.'); }
@@ -505,7 +509,7 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
                   <td className="sub">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
                   <td>{l.onHold ? <Pill color="amber">On hold</Pill> : <Pill color="green">Active</Pill>}</td>
                   <td className="rowact">
-                    {canEditView ? (
+                    {pendingIds.has(l.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
                       <>
                         {l.onHold
                           ? <button className="btn btn-ghost btn-sm" onClick={() => release(l.id)}>Release</button>
@@ -689,7 +693,8 @@ function SalesFormModal({ db, onClose, refresh, notify }) {
 }
 
 /* ===================== INVOICES ===================== */
-function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal, notify, canEditView }) {
+function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal, notify, canEditView, pendingDel }) {
+  const pendingIds = new Set((pendingDel && pendingDel.invoices) || []);
   let rows = db.invoices.filter((i) => !search || [i.no, i.type, nameOf(db.brands, i.brandId), nameOf(db.units, i.unitId)].join(' ').toLowerCase().includes(search.toLowerCase()));
   if (filterVal) rows = rows.filter((i) => i.type === filterVal);
   rows = [...rows].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
@@ -721,8 +726,12 @@ function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal
                     <button className="iconbtn" title="View e-invoice" onClick={() => setModal({ type: 'viewInvoice', id: i.id })}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>
                     </button>
-                    {canEditView && i.status !== 'Paid' && <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'collection', invoiceId: i.id })}>Collect</button>}
-                    {canEditView && <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvoice', id: i.id })}><DelIcon /></button>}
+                    {pendingIds.has(i.id) ? <Pill color="amber">Deletion pending</Pill> : (
+                      <>
+                        {canEditView && i.status !== 'Paid' && <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'collection', invoiceId: i.id })}>Collect</button>}
+                        {canEditView && <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvoice', id: i.id })}><DelIcon /></button>}
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -835,7 +844,8 @@ function ViewInvoiceModal({ id, db, onClose }) {
 }
 
 /* ===================== COLLECTIONS ===================== */
-function CollectionsPage({ db, search, setSearch, setModal, canEditView }) {
+function CollectionsPage({ db, search, setSearch, setModal, canEditView, pendingDel }) {
+  const pendingIds = new Set((pendingDel && pendingDel.collections) || []);
   const rows = db.collections.filter((c) => {
     const inv = findById(db.invoices, c.invoiceId);
     return !search || [c.no, inv?.no, c.ref].join(' ').toLowerCase().includes(search.toLowerCase());
@@ -861,7 +871,7 @@ function CollectionsPage({ db, search, setSearch, setModal, canEditView }) {
                     <td className="num sub">{money0(c.tds)}</td>
                     <td><Pill color="grey">{c.instrument}</Pill></td>
                     <td className="sub">{c.ref || '—'}</td>
-                    <td className="rowact">{canEditView ? <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteCollection', id: c.id })}><DelIcon /></button> : <span className="sub">—</span>}</td>
+                    <td className="rowact">{pendingIds.has(c.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteCollection', id: c.id })}><DelIcon /></button> : <span className="sub">—</span>}</td>
                   </tr>
                 );
               })}
@@ -933,7 +943,8 @@ function CollectionFormModal({ invoiceId, db, onClose, refresh, notify }) {
 }
 
 /* ===================== INVESTOR UNITS (maker-checker) ===================== */
-function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, notify, canEditView }) {
+function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, notify, canEditView, pendingDel }) {
+  const pendingIds = new Set((pendingDel && pendingDel.investors) || []);
   const rows = db.investorUnits.filter((iv) => !search || [iv.code, nameOf(db.units, iv.unitId), iv.investors.map((x) => x.name).join(' ')].join(' ').toLowerCase().includes(search.toLowerCase()));
   const mayApprove = canApproveRole(actingRole);
   const approve = async (id) => {
@@ -964,13 +975,17 @@ function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, n
                     <td className="num">{iv.investors.map((x) => `${x.disbursePct}%`).join(' / ')}</td>
                     <td>{iv.status === 'Approved' ? <Pill color="green">Approved</Pill> : <Pill color="amber">Pending</Pill>}</td>
                     <td className="rowact">
-                      {iv.status === 'Pending' && mayApprove && <button className="btn btn-teal btn-sm" onClick={() => approve(iv.id)}>Approve</button>}
-                      {canEditView ? (
+                      {pendingIds.has(iv.id) ? <Pill color="amber">Deletion pending</Pill> : (
                         <>
-                          <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'investor', id: iv.id })}><EditIcon /></button>
-                          <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvestor', id: iv.id })}><DelIcon /></button>
+                          {iv.status === 'Pending' && mayApprove && <button className="btn btn-teal btn-sm" onClick={() => approve(iv.id)}>Approve</button>}
+                          {canEditView ? (
+                            <>
+                              <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'investor', id: iv.id })}><EditIcon /></button>
+                              <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvestor', id: iv.id })}><DelIcon /></button>
+                            </>
+                          ) : (!mayApprove && <span className="sub">—</span>)}
                         </>
-                      ) : (!mayApprove && <span className="sub">—</span>)}
+                      )}
                     </td>
                   </tr>
                 );
@@ -1287,6 +1302,7 @@ function DeletionsPage({ refresh, notify }) {
   const [tab, setTab] = useState('Pending');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [confirm, setConfirm] = useState(null); // { row, action }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1296,13 +1312,15 @@ function DeletionsPage({ refresh, notify }) {
   }, [tab]); // eslint-disable-line
   useEffect(() => { load(); }, [load]);
 
-  const decide = async (id, action) => {
+  const runDecision = async () => {
+    const { row, action } = confirm;
     try {
-      if (action === 'approve') { await api.deletionRequests.approve(id); notify('Deletion approved — record removed.'); }
-      else { await api.deletionRequests.reject(id); notify('Deletion request rejected.'); }
+      if (action === 'approve') { await api.deletionRequests.approve(row.id); notify('Deletion approved — record removed.'); }
+      else { await api.deletionRequests.reject(row.id); notify('Deletion request rejected — record kept.'); }
+      setConfirm(null);
       await load();
       await refresh(); // refresh underlying data + badges
-    } catch (e) { notify(e.message, true); }
+    } catch (e) { notify(e.message, true); setConfirm(null); }
   };
 
   const ENTITY_LABEL = {
@@ -1332,8 +1350,8 @@ function DeletionsPage({ refresh, notify }) {
                     <td className="sub">{r.requestedAt ? new Date(r.requestedAt).toLocaleString('en-GB') : '—'}</td>
                     {tab === 'Pending' ? (
                       <td className="rowact">
-                        <button className="btn btn-teal btn-sm" onClick={() => decide(r.id, 'approve')}>Approve</button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => decide(r.id, 'reject')}>Reject</button>
+                        <button className="btn btn-teal btn-sm" onClick={() => setConfirm({ row: r, action: 'approve' })}>Approve</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => setConfirm({ row: r, action: 'reject' })}>Reject</button>
                       </td>
                     ) : (
                       <td>{r.decidedBy || '—'}<div className="sub">{r.decidedAt ? new Date(r.decidedAt).toLocaleString('en-GB') : ''}</div></td>
@@ -1344,6 +1362,17 @@ function DeletionsPage({ refresh, notify }) {
             </table>
           )}
       </div>
+      {confirm && (
+        <ConfirmModal
+          title={confirm.action === 'approve' ? 'Approve deletion?' : 'Reject deletion request?'}
+          message={confirm.action === 'approve'
+            ? `This will permanently delete "${confirm.row.label}" (${ENTITY_LABEL[confirm.row.entity] || confirm.row.entity}), requested by ${confirm.row.requestedBy}. This cannot be undone.`
+            : `The record "${confirm.row.label}" will be kept and the request from ${confirm.row.requestedBy} will be marked rejected.`}
+          confirmLabel={confirm.action === 'approve' ? 'Approve & delete' : 'Reject request'}
+          onClose={() => setConfirm(null)}
+          onConfirm={runDecision}
+        />
+      )}
     </>
   );
 }
