@@ -9,7 +9,8 @@
     "setup-db": "node setup-db.js",
     "seed": "node seed.js",
     "test-entries": "node test-entries.js",
-    "test-full": "node test-entries-full.js"
+    "test-full": "node test-entries-full.js",
+    "test-bulk": "node test-bulk.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
