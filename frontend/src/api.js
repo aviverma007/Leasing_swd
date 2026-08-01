@@ -78,5 +78,9 @@ export const api = {
     count: () => req('GET', '/deletion-requests/count'),
     approve: (id, note) => req('POST', `/deletion-requests/${id}/approve`, { note }),
     reject: (id, note) => req('POST', `/deletion-requests/${id}/reject`, { note })
+  },
+  userAdmin: {
+    meta: (id) => req('GET', `/user-admin/${id}/meta`),
+    resetPassword: (id, newPassword) => req('POST', `/user-admin/${id}/reset-password`, { newPassword })
   }
 };

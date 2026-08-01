@@ -79,7 +79,8 @@ CREATE TABLE leasing.Users(
     Email     NVARCHAR(200) NOT NULL,
     Password  NVARCHAR(200) NOT NULL,
     Role      VARCHAR(50) NOT NULL,   -- Manager / Leasing Head / Finance Head / Center/Portfolio Head / Owner Representative
-    Active    VARCHAR(20) NOT NULL DEFAULT 'Active'
+    Active    VARCHAR(20) NOT NULL DEFAULT 'Active',
+    PwdChangedAt DATETIME2 NULL
 );
 GO
 
@@ -238,6 +239,12 @@ CREATE NONCLUSTERED INDEX IX_Disbursals_Month ON leasing.Disbursals(Month);
 CREATE NONCLUSTERED INDEX IX_Disbursals_InvUnit ON leasing.Disbursals(InvestorUnitId);
 GO
 
+
+
+-- Ensure PwdChangedAt exists even if Users table pre-dates this column
+IF COL_LENGTH('leasing.Users','PwdChangedAt') IS NULL
+    ALTER TABLE leasing.Users ADD PwdChangedAt DATETIME2 NULL;
+GO
 
 IF OBJECT_ID('leasing.DeletionRequests','U') IS NULL
 CREATE TABLE leasing.DeletionRequests(

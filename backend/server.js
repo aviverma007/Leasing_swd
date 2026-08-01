@@ -43,5 +43,8 @@ app.use('/api/reports', requireModule('reports'), require('./routes/reports'));
 // deletion approval queue (route enforces admin-only for approve/reject internally)
 app.use('/api/deletion-requests', require('./routes/deletionRequests'));
 
+// admin-only user password reset + metadata
+app.use('/api/user-admin', require('./routes/userAdmin'));
+
 const PORT = process.env.PORT || 5096;
 app.listen(PORT, () => console.log(`Leasing & Billing API listening on port ${PORT}`));

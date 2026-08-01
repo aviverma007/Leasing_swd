@@ -33,7 +33,7 @@ const ENTITIES = {
   users: {
     table: 'Users', prefix: 'USR',
     cols: ['Email', 'Password', 'Role', 'Active'],
-    map: r => ({ id: r.Id, code: r.Code, email: r.Email, role: r.Role, active: r.Active })
+    map: r => ({ id: r.Id, code: r.Code, email: r.Email, role: r.Role, active: r.Active, pwdChangedAt: r.PwdChangedAt })
   }
 };
 
@@ -100,6 +100,9 @@ function router(entityKey) {
         values.push(`@${param}`);
       });
       await request.query(`INSERT INTO ${SCHEMA}.${ent.table} (${colNames.join(',')}) VALUES (${values.join(',')})`);
+      if (entityKey === 'users' && body.password) {
+        await pool.request().input('id', sql.VarChar(40), id).query(`UPDATE ${SCHEMA}.Users SET PwdChangedAt=SYSDATETIME() WHERE Id=@id`);
+      }
       const row = await pool.request().input('id', sql.VarChar(40), id).query(`SELECT * FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
       res.json(ent.map(row.recordset[0]));
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -111,9 +114,11 @@ function router(entityKey) {
       const body = req.body || {};
       // Users: if a new password is supplied, hash it; if blank, don't touch the stored password
       let cols = ent.cols;
+      let pwdChanged = false;
       if (entityKey === 'users') {
         if (body.password) {
           body.password = await bcrypt.hash(String(body.password), 10);
+          pwdChanged = true;
         } else {
           cols = ent.cols.filter(c => c !== 'Password');
         }
@@ -132,7 +137,8 @@ function router(entityKey) {
         bindValue(request, param, col, body[key]);
         return `${col}=@${param}`;
       });
-      await request.query(`UPDATE ${SCHEMA}.${ent.table} SET ${sets.join(',')} WHERE Id=@id`);
+      const setClause = sets.join(',') + (pwdChanged ? ', PwdChangedAt=SYSDATETIME()' : '');
+      await request.query(`UPDATE ${SCHEMA}.${ent.table} SET ${setClause} WHERE Id=@id`);
       const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
       res.json(ent.map(row.recordset[0]));
     } catch (e) { res.status(500).json({ error: e.message }); }

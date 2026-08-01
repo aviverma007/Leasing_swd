@@ -82,7 +82,8 @@ CREATE TABLE dbo.Users(
     Email     NVARCHAR(200) NOT NULL,
     Password  NVARCHAR(200) NOT NULL,
     Role      VARCHAR(50) NOT NULL,   -- Manager / Leasing Head / Finance Head / Center/Portfolio Head / Owner Representative
-    Active    VARCHAR(20) NOT NULL DEFAULT 'Active'
+    Active    VARCHAR(20) NOT NULL DEFAULT 'Active',
+    PwdChangedAt DATETIME2 NULL
 );
 GO
 

@@ -81,12 +81,12 @@ export const MASTER_SCHEMA = {
     sing: 'User',
     fields: [
       { k: 'email', l: 'Email address', req: 1, ph: 'finance@scoopsense.io' },
-      { k: 'password', l: 'Password', type: 'password', req: 1, ph: 'Set password' },
+      { k: 'password', l: 'Password', type: 'password', ph: 'Leave blank to keep unchanged' },
       { k: 'role', l: 'Role in hierarchy', type: 'select', opts: ROLES },
       { k: 'active', l: 'Status', type: 'select', opts: ['Active', 'Inactive'] }
     ],
-    head: ['Code', 'Email', 'Role', 'Status'],
-    cols: (r) => [r.code, r.email, r.role, r.active]
+    head: ['Code', 'Email', 'Role', 'Status', 'Password'],
+    cols: (r) => [r.code, r.email, r.role, r.active, r.pwdChangedAt ? ('Set · ' + new Date(r.pwdChangedAt).toLocaleDateString('en-GB')) : 'Set (legacy)']
   }
 };
 

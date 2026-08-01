@@ -220,6 +220,9 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
                     <td className="rowact">
                       {pendingIds.has(r.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
                         <>
+                          {entity === 'users' && <button className="iconbtn" title="Reset password" onClick={() => setModal({ type: 'resetPassword', user: r })}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15 8m0 0l3 3m-3-3l2.5-2.5" /></svg>
+                          </button>}
                           <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'master', entity, id: r.id })}><EditIcon /></button>
                           <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteMaster', entity, id: r.id, name: r.name })}><DelIcon /></button>
                         </>
@@ -251,6 +254,8 @@ function MasterFormModal({ entity, id, db, onClose, refresh, notify }) {
     for (const f of sc.fields) {
       if (f.req && !form[f.k]) return notify(`${f.l} is required.`, true);
     }
+    // Password is required when creating a user, optional (keep existing) when editing
+    if (entity === 'users' && !id && !form.password) return notify('Password is required for a new user.', true);
     try {
       if (id) await api[entity].update(id, form); else await api[entity].create(form);
       await refresh([entity]);
@@ -284,6 +289,45 @@ function MasterFormModal({ entity, id, db, onClose, refresh, notify }) {
   );
 }
 
+function ResetPasswordModal({ user, onClose, refresh, notify }) {
+  const [meta, setMeta] = useState(null);
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try { setMeta(await api.userAdmin.meta(user.id)); } catch (e) { notify(e.message, true); }
+    })();
+  }, [user.id]); // eslint-disable-line
+
+  const save = async () => {
+    if (!pw || pw.length < 4) return notify('Enter a new password (at least 4 characters).', true);
+    if (pw !== pw2) return notify("Passwords don't match.", true);
+    setBusy(true);
+    try {
+      await api.userAdmin.resetPassword(user.id, pw);
+      await refresh(['users']);
+      notify('Password reset. The user can now sign in with the new password.');
+      onClose();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title={`Reset password — ${user.email}`} onClose={onClose} onSave={save} saveLabel={busy ? 'Saving…' : 'Reset password'}>
+      <Callout>For security, the current password can't be shown — it's stored one-way (encrypted). You can set a new one here; the user logs in with it going forward.</Callout>
+      <div style={{ margin: '12px 0', fontSize: 12.5, color: 'var(--muted)' }}>
+        <div>Role: <b style={{ color: 'var(--ink)' }}>{user.role}</b> · Status: <b style={{ color: 'var(--ink)' }}>{user.active}</b></div>
+        <div>Password last changed: <b style={{ color: 'var(--ink)' }}>{meta?.pwdChangedAt ? new Date(meta.pwdChangedAt).toLocaleString('en-GB') : (meta ? 'never recorded' : '…')}</b></div>
+        {meta && !meta.hashed && <div style={{ color: 'var(--amber)', marginTop: 4 }}>This account still uses a legacy password. Resetting it will secure (encrypt) it.</div>}
+      </div>
+      <div className="field"><label>New password <span className="req">*</span></label><input type="password" value={pw} placeholder="New password" onChange={(e) => setPw(e.target.value)} /></div>
+      <div className="field"><label>Confirm new password <span className="req">*</span></label><input type="password" value={pw2} placeholder="Re-enter new password" onChange={(e) => setPw2(e.target.value)} /></div>
+    </Modal>
+  );
+}
+
 /* ===================== MODAL ROUTER ===================== */
 function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin }) {
   const close = () => setModal(null);
@@ -305,6 +349,8 @@ function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin
       return <ConfirmModal title={`Delete this ${MASTER_SCHEMA[modal.entity].sing.toLowerCase()}?`}
         message={`This will remove "${modal.name}" permanently.` + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
         onConfirm={() => doDelete(() => api[modal.entity].remove(modal.id), [modal.entity])} />;
+    case 'resetPassword':
+      return <ResetPasswordModal user={modal.user} onClose={close} refresh={refresh} notify={notify} />;
     case 'lease':
       return <LeaseFormModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'holdLease':
