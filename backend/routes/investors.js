@@ -1,6 +1,7 @@
 const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, iso } = require('../lib/helpers');
+const { canApprove } = require('../lib/permissions');
 const router = express.Router();
 
 async function mapInvestorUnit(pool, r) {
@@ -30,7 +31,8 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const pool = await getPool();
-    const { unitId, floor, investors, actingRole } = req.body;
+    const { unitId, floor, investors } = req.body;
+    const actingRole = req.user.role;
     if (!investors || !investors.length || investors.some(x => !x.name)) return res.status(400).json({ error: 'Every investor needs a name.' });
     const totalDisb = investors.reduce((s, x) => s + Number(x.disbursePct || 0), 0);
     if (Math.abs(totalDisb - 100) > 0.5) return res.status(400).json({ error: 'Disbursement % across investors must total 100%.' });
@@ -61,7 +63,8 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const pool = await getPool();
-    const { floor, investors, actingRole } = req.body;
+    const { floor, investors } = req.body;
+    const actingRole = req.user.role;
     const totalDisb = investors.reduce((s, x) => s + Number(x.disbursePct || 0), 0);
     if (Math.abs(totalDisb - 100) > 0.5) return res.status(400).json({ error: 'Disbursement % across investors must total 100%.' });
 
@@ -87,8 +90,8 @@ router.put('/:id', async (req, res) => {
 router.post('/:id/approve', async (req, res) => {
   try {
     const pool = await getPool();
-    const { actingRole } = req.body;
-    if (!['Finance Head', 'Center/Portfolio Head'].includes(actingRole)) return res.status(403).json({ error: 'Only Finance/Portfolio Head can approve.' });
+    const actingRole = req.user.role;
+    if (!canApprove(actingRole)) return res.status(403).json({ error: 'Only Admin, Finance Head, or Portfolio Head can approve.' });
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('checker', sql.NVarChar(100), actingRole)
       .query(`UPDATE ${SCHEMA}.InvestorUnits SET Status='Approved', Checker=@checker WHERE Id=@id`);
     res.json({ ok: true });

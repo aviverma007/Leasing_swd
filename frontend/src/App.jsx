@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { api, setToken } from './api.js';
+import { api, setToken, setAuthExpiredHandler } from './api.js';
 import Login from './Login.jsx';
 import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
 import {
@@ -78,6 +78,14 @@ export default function App() {
     setDb(EMPTY_DB);
     setView('dashboard');
   };
+
+  useEffect(() => {
+    setAuthExpiredHandler(() => {
+      setAuthUser(null);
+      setDb(EMPTY_DB);
+      setView('dashboard');
+    });
+  }, []);
 
   if (!authUser) return <Login onLogin={onLogin} />;
 

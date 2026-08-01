@@ -14,9 +14,16 @@ async function req(method, path, body) {
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && onAuthExpired) {
+    authToken = null;
+    onAuthExpired();
+  }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
+
+let onAuthExpired = null;
+export function setAuthExpiredHandler(fn) { onAuthExpired = fn; }
 
 const crud = (path) => ({
   list: () => req('GET', path),

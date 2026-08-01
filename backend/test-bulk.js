@@ -13,11 +13,17 @@
 */
 
 const BASE = `http://localhost:${process.env.PORT || 5096}/api`;
+const ADMIN_ID = process.env.ADMIN_ID || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+let TOKEN = '';
 
 async function call(method, path, body) {
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
   const res = await fetch(BASE + path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await res.json().catch(() => ({}));
@@ -28,10 +34,26 @@ const iso = (d) => d.toISOString().slice(0, 10);
 const monthsAgoDate = (m) => iso(new Date(new Date().setMonth(new Date().getMonth() - m)));
 function ymOffset(months) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + months); return iso(d).slice(0, 7); }
 
+async function login() {
+  if (!ADMIN_PASSWORD) {
+    console.error('✗ ADMIN_PASSWORD is not set in .env — cannot authenticate to seed data.');
+    process.exit(1);
+  }
+  try {
+    const r = await call('POST', '/auth/login', { username: ADMIN_ID, password: ADMIN_PASSWORD });
+    TOKEN = r.token;
+  } catch (e) {
+    console.error('✗ Admin login failed:', e.message);
+    console.error('  Check ADMIN_ID / ADMIN_PASSWORD in .env match your login.');
+    process.exit(1);
+  }
+}
+
 async function run() {
   console.log(`\nCreating BULK test data via ${BASE} ...\n`);
   try { const h = await call('GET', '/health'); if (!h.ok) throw new Error('health not ok'); }
   catch (e) { console.error('✗ API not reachable — start the backend (npm start) first.\n  ' + e.message); process.exit(1); }
+  await login();
 
   const thisYm = ymOffset(0), lastYm = ymOffset(-1);
   const start3 = monthsAgoDate(3);

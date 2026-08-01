@@ -2,6 +2,7 @@ const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, iso, round2 } = require('../lib/helpers');
 const { rentCollectedForUnit } = require('../lib/billing');
+const { canApprove } = require('../lib/permissions');
 const router = express.Router();
 
 // Candidates: approved investor units with rent collected in month, not yet disbursed (or already done)
@@ -77,7 +78,8 @@ router.get('/', async (req, res) => {
 router.post('/process', async (req, res) => {
   try {
     const pool = await getPool();
-    const { investorUnitId, invIdx, month, rentGross, deductions, tdsPct, outstanding, mode, ref, narration, remarks, actingRole } = req.body;
+    const { investorUnitId, invIdx, month, rentGross, deductions, tdsPct, outstanding, mode, ref, narration, remarks } = req.body;
+    const actingRole = req.user.role;
 
     const ivRow = await pool.request().input('id', sql.VarChar(40), investorUnitId).query(`SELECT * FROM ${SCHEMA}.InvestorUnits WHERE Id=@id`);
     const iv = ivRow.recordset[0];
@@ -95,7 +97,7 @@ router.post('/process', async (req, res) => {
     const net = round2(Number(rentGross) - dedTotal - tds - out);
     if (net < 0) return res.status(400).json({ error: 'Net payable is negative — check deductions.' });
 
-    const canApprove = ['Finance Head', 'Center/Portfolio Head'].includes(actingRole);
+    const isApprover = canApprove(actingRole);
     const id = uid();
     const no = await nextNo(pool, sql, 'DIS');
     await pool.request()
@@ -107,23 +109,23 @@ router.post('/process', async (req, res) => {
       .input('out', sql.Decimal(18, 2), out).input('net', sql.Decimal(18, 2), net).input('mode', sql.VarChar(20), mode)
       .input('ref', sql.NVarChar(100), ref || '').input('bank', sql.NVarChar(150), inv.BankName).input('acc', sql.NVarChar(60), inv.Acc)
       .input('ifsc', sql.NVarChar(20), inv.Ifsc).input('nri', sql.Bit, inv.Nri ? 1 : 0).input('narr', sql.NVarChar(300), narration || '')
-      .input('status', sql.VarChar(20), canApprove ? 'Processed' : 'Pending').input('maker', sql.NVarChar(100), actingRole || '')
-      .input('checker', sql.NVarChar(100), canApprove ? actingRole : '').input('rem', sql.NVarChar(400), remarks || '')
+      .input('status', sql.VarChar(20), isApprover ? 'Processed' : 'Pending').input('maker', sql.NVarChar(100), actingRole || '')
+      .input('checker', sql.NVarChar(100), isApprover ? actingRole : '').input('rem', sql.NVarChar(400), remarks || '')
       .input('created', sql.Date, iso(new Date()))
       .query(`INSERT INTO ${SCHEMA}.Disbursals (Id,No,Month,InvestorUnitId,InvIdx,InvestorName,UnitId,BrandId,RentGross,DeductionsJson,
         TotalDeductions,TdsPct,TdsAmt,Outstanding,NetPayable,Mode,Ref,Bank,Acc,Ifsc,Nri,Narration,Status,Maker,Checker,Remarks,CreatedAt)
         VALUES (@id,@no,@month,@ivId,@idx,@name,@unitId,@brandId,@rentGross,@dedJson,@dedTotal,@tdsPct,@tds,@out,@net,@mode,@ref,
         @bank,@acc,@ifsc,@nri,@narr,@status,@maker,@checker,@rem,@created)`);
 
-    res.json({ id, no, status: canApprove ? 'Processed' : 'Pending', netPayable: net });
+    res.json({ id, no, status: isApprover ? 'Processed' : 'Pending', netPayable: net });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/:id/approve', async (req, res) => {
   try {
     const pool = await getPool();
-    const { actingRole } = req.body;
-    if (!['Finance Head', 'Center/Portfolio Head'].includes(actingRole)) return res.status(403).json({ error: 'Only Finance/Portfolio Head can approve.' });
+    const actingRole = req.user.role;
+    if (!canApprove(actingRole)) return res.status(403).json({ error: 'Only Admin, Finance Head, or Portfolio Head can approve.' });
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('checker', sql.NVarChar(100), actingRole)
       .query(`UPDATE ${SCHEMA}.Disbursals SET Status='Processed', Checker=@checker WHERE Id=@id`);
     res.json({ ok: true });
