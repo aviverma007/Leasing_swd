@@ -1,7 +1,7 @@
 /* Populates demo data — run with: node seed.js
    Mirrors the seed() function from the original ScoopSense prototype. */
 require('dotenv').config();
-const { sql, getPool } = require('./db');
+const { sql, getPool, SCHEMA } = require('./db');
 const { uid, nextNo, addM, iso } = require('./lib/helpers');
 const { genLeaseInvoices, syncRevShare } = require('./lib/billing');
 
@@ -14,7 +14,7 @@ async function run() {
   const co = async (name) => {
     const id = uid(), code = await nextNo(pool, sql, 'CO');
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code).input('name', sql.NVarChar(200), name)
-      .query('INSERT INTO dbo.Companies (Id,Code,Name) VALUES (@id,@code,@name)');
+      .query(`INSERT INTO ${SCHEMA}.Companies (Id,Code,Name) VALUES (@id,@code,@name)`);
     return { id, name };
   };
   const c1 = await co('Vertex Retail Ventures Pvt Ltd');
@@ -24,7 +24,7 @@ async function run() {
   const as = async (name, city) => {
     const id = uid(), code = await nextNo(pool, sql, 'AST');
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code).input('name', sql.NVarChar(200), name).input('city', sql.NVarChar(100), city)
-      .query('INSERT INTO dbo.Assets (Id,Code,Name,City) VALUES (@id,@code,@name,@city)');
+      .query(`INSERT INTO ${SCHEMA}.Assets (Id,Code,Name,City) VALUES (@id,@code,@name,@city)`);
     return { id, name };
   };
   const a1 = await as('Meridian Mall', 'Mumbai');
@@ -34,7 +34,7 @@ async function run() {
     const id = uid(), code = await nextNo(pool, sql, 'BLK');
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code).input('name', sql.NVarChar(200), name)
       .input('assetId', sql.VarChar(40), asset.id).input('floors', sql.Int, floors)
-      .query('INSERT INTO dbo.Blocks (Id,Code,Name,AssetId,TotalFloors) VALUES (@id,@code,@name,@assetId,@floors)');
+      .query(`INSERT INTO ${SCHEMA}.Blocks (Id,Code,Name,AssetId,TotalFloors) VALUES (@id,@code,@name,@assetId,@floors)`);
     return { id, name, assetId: asset.id };
   };
   const b1 = await bl('North Wing', a1, 4);
@@ -46,7 +46,7 @@ async function run() {
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code).input('name', sql.NVarChar(100), name)
       .input('assetId', sql.VarChar(40), asset.id).input('blockId', sql.VarChar(40), block.id).input('floor', sql.Int, floor)
       .input('carpet', sql.Decimal(18, 2), carpet).input('builtup', sql.Decimal(18, 2), builtup)
-      .query(`INSERT INTO dbo.Units (Id,Code,Name,AssetId,BlockId,Floor,CarpetArea,BuiltupArea,Status)
+      .query(`INSERT INTO ${SCHEMA}.Units (Id,Code,Name,AssetId,BlockId,Floor,CarpetArea,BuiltupArea,Status)
         VALUES (@id,@code,@name,@assetId,@blockId,@floor,@carpet,@builtup,'Vacant')`);
     return { id, name, assetId: asset.id, carpetArea: carpet, builtupArea: builtup };
   };
@@ -59,7 +59,7 @@ async function run() {
     const id = uid(), code = await nextNo(pool, sql, 'BRD');
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code).input('name', sql.NVarChar(200), name)
       .input('companyId', sql.VarChar(40), company.id).input('category', sql.NVarChar(50), category)
-      .query(`INSERT INTO dbo.Brands (Id,Code,Name,CompanyId,Category,RegularAddress,Address) VALUES (@id,@code,@name,@companyId,@category,'','')`);
+      .query(`INSERT INTO ${SCHEMA}.Brands (Id,Code,Name,CompanyId,Category,RegularAddress,Address) VALUES (@id,@code,@name,@companyId,@category,'','')`);
     return { id, name, companyId: company.id };
   };
   const br1 = await br('Vertex Hypermart', c1, 'Hypermarket');
@@ -70,7 +70,7 @@ async function run() {
     const id = uid(), code = await nextNo(pool, sql, 'USR');
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code).input('email', sql.NVarChar(200), email)
       .input('pw', sql.NVarChar(200), 'ChangeMe@123').input('role', sql.VarChar(50), role).input('active', sql.VarChar(20), active)
-      .query('INSERT INTO dbo.Users (Id,Code,Email,Password,Role,Active) VALUES (@id,@code,@email,@pw,@role,@active)');
+      .query(`INSERT INTO ${SCHEMA}.Users (Id,Code,Email,Password,Role,Active) VALUES (@id,@code,@email,@pw,@role,@active)`);
   };
   await usr('manager@scoopsense.io', 'Manager', 'Active');
   await usr('leasing@scoopsense.io', 'Leasing Head', 'Active');
@@ -87,9 +87,9 @@ async function run() {
       .input('mgBasis', sql.VarChar(20), o.mgBasis).input('mg', sql.Decimal(18, 2), o.mg).input('revSharePct', sql.Decimal(9, 3), o.revSharePct)
       .input('cam', sql.Decimal(18, 2), o.cam).input('utility', sql.Decimal(18, 2), o.utility).input('esc', sql.Decimal(9, 3), o.esc)
       .input('deposit', sql.Decimal(18, 2), o.deposit).input('gst', sql.Decimal(9, 3), o.gst)
-      .query(`INSERT INTO dbo.Leases (Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,OnHold,Status)
+      .query(`INSERT INTO ${SCHEMA}.Leases (Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,OnHold,Status)
         VALUES (@id,@code,@brandId,@unitId,@assetId,@start,@end,@rentalType,@mgBasis,@mg,@revSharePct,@cam,@utility,@esc,@deposit,@gst,0,'Active')`);
-    await pool.request().input('u', sql.VarChar(40), unit.id).query(`UPDATE dbo.Units SET Status='Leased' WHERE Id=@u`);
+    await pool.request().input('u', sql.VarChar(40), unit.id).query(`UPDATE ${SCHEMA}.Units SET Status='Leased' WHERE Id=@u`);
     return { id, unitId: unit.id, brandId: brand.id };
   };
 
@@ -104,14 +104,14 @@ async function run() {
     await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code).input('unitId', sql.VarChar(40), unit.id)
       .input('floor', sql.Int, 0).input('status', sql.VarChar(20), status).input('maker', sql.NVarChar(100), 'Leasing Head')
       .input('checker', sql.NVarChar(100), status === 'Approved' ? 'Finance Head' : '').input('created', sql.Date, TODAY)
-      .query(`INSERT INTO dbo.InvestorUnits (Id,Code,UnitId,Floor,Status,Maker,Checker,Remarks,CreatedAt) VALUES (@id,@code,@unitId,@floor,@status,@maker,@checker,'',@created)`);
+      .query(`INSERT INTO ${SCHEMA}.InvestorUnits (Id,Code,UnitId,Floor,Status,Maker,Checker,Remarks,CreatedAt) VALUES (@id,@code,@unitId,@floor,@status,@maker,@checker,'',@created)`);
     for (let i = 0; i < investors.length; i++) {
       const x = investors[i];
       await pool.request().input('id', sql.VarChar(40), uid()).input('iv', sql.VarChar(40), id).input('idx', sql.Int, i)
         .input('name', sql.NVarChar(200), x.name).input('area', sql.Decimal(9, 3), x.areaPct).input('disb', sql.Decimal(9, 3), x.disbursePct)
         .input('start', sql.Date, x.start).input('gst', sql.Bit, x.gst ? 1 : 0).input('nri', sql.Bit, x.nri ? 1 : 0)
         .input('bank', sql.NVarChar(150), x.bankName).input('acc', sql.NVarChar(60), x.acc).input('ifsc', sql.NVarChar(20), x.ifsc)
-        .query(`INSERT INTO dbo.InvestorUnitInvestors (Id,InvestorUnitId,Idx,Name,AreaPct,DisbursePct,StartDate,Gst,Nri,BankName,Acc,Ifsc)
+        .query(`INSERT INTO ${SCHEMA}.InvestorUnitInvestors (Id,InvestorUnitId,Idx,Name,AreaPct,DisbursePct,StartDate,Gst,Nri,BankName,Acc,Ifsc)
           VALUES (@id,@iv,@idx,@name,@area,@disb,@start,@gst,@nri,@bank,@acc,@ifsc)`);
     }
     return id;
@@ -137,7 +137,7 @@ async function run() {
       const ym = addM(TODAY, -k).slice(0, 7);
       const amt = l.id === l3.id ? 4200000 : 1600000;
       await pool.request().input('id', sql.VarChar(40), uid()).input('l', sql.VarChar(40), l.id).input('y', sql.Char(7), ym).input('amt', sql.Decimal(18, 2), amt)
-        .query('INSERT INTO dbo.Sales (Id,LeaseId,Ym,Amount) VALUES (@id,@l,@y,@amt)');
+        .query(`INSERT INTO ${SCHEMA}.Sales (Id,LeaseId,Ym,Amount) VALUES (@id,@l,@y,@amt)`);
       await syncRevShare(pool, l.id, ym);
     }
   }
