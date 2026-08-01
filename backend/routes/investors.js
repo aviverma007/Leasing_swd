@@ -100,13 +100,10 @@ router.post('/:id/approve', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const pool = await getPool();
-    const chk = await pool.request().input('id', sql.VarChar(40), req.params.id).query(
-      `SELECT COUNT(*) cnt FROM ${SCHEMA}.Disbursals WHERE InvestorUnitId=@id AND Status<>'Void'`);
-    if (chk.recordset[0].cnt > 0) return res.status(400).json({ error: "Can't delete: disbursals exist." });
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.InvestorUnits WHERE Id=@id`);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const { handleDelete } = require('../lib/deleteGate');
+    const result = await handleDelete('investors', req.params.id, req.user, req.body?.reason);
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 module.exports = router;

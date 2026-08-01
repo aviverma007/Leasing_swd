@@ -121,7 +121,9 @@ export const NAV = [
   { v: 'investors', label: 'Investor Units' },
   { v: 'disbursement', label: 'Process Disbursement' },
   { grp: 'Reports' },
-  { v: 'reports', label: 'Reports & SAP' }
+  { v: 'reports', label: 'Reports & SAP' },
+  { grp: 'Admin' },
+  { v: 'deletions', label: 'Pending Deletions' }
 ];
 
 export const PAGES = {
@@ -138,5 +140,6 @@ export const PAGES = {
   collections: { t: 'Collections', s: 'Invoice-wise receipts with TDS and instrument' },
   investors: { t: 'Investor Units', s: "Investor ownership, disbursement % & bank details (maker-checker)" },
   disbursement: { t: 'Process Rent Disbursement', s: 'Monthly disbursement with deductions, TDS, hold & payment' },
-  reports: { t: 'Reports & SAP Entry Book', s: 'Disbursement, hold, SD and GL export' }
+  reports: { t: 'Reports & SAP Entry Book', s: 'Disbursement, hold, SD and GL export' },
+  deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' }
 };

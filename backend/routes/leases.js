@@ -114,24 +114,10 @@ router.post('/:id/release', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const pool = await getPool();
-    const paidCheck = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`
-      SELECT COUNT(*) cnt FROM ${SCHEMA}.Invoices i JOIN ${SCHEMA}.Collections c ON c.InvoiceId=i.Id WHERE i.LeaseId=@id`);
-    if (paidCheck.recordset[0].cnt > 0) return res.status(400).json({ error: "Can't delete: collected invoices exist." });
-
-    const leaseRow = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
-    const lease = leaseRow.recordset[0];
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Invoices WHERE LeaseId=@id`);
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Leases WHERE Id=@id`);
-    if (lease) {
-      const other = await pool.request().input('u', sql.VarChar(40), lease.UnitId).query(
-        `SELECT COUNT(*) cnt FROM ${SCHEMA}.Leases WHERE UnitId=@u AND Status='Active'`);
-      if (other.recordset[0].cnt === 0) {
-        await pool.request().input('u', sql.VarChar(40), lease.UnitId).query(`UPDATE ${SCHEMA}.Units SET Status='Vacant' WHERE Id=@u`);
-      }
-    }
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const { handleDelete } = require('../lib/deleteGate');
+    const result = await handleDelete('leases', req.params.id, req.user, req.body?.reason);
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 module.exports = router;

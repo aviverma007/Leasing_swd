@@ -29,7 +29,7 @@ const crud = (path) => ({
   list: () => req('GET', path),
   create: (body) => req('POST', path, body),
   update: (id, body) => req('PUT', `${path}/${id}`, body),
-  remove: (id) => req('DELETE', `${path}/${id}`)
+  remove: (id, reason) => req('DELETE', `${path}/${id}`, reason ? { reason } : undefined)
 });
 
 export const api = {
@@ -71,5 +71,12 @@ export const api = {
     summary: () => req('GET', '/reports/summary'),
     sapEntries: () => req('GET', '/reports/sap-entries'),
     log: () => req('GET', '/reports/log')
+  },
+  deletionRequests: {
+    list: (status) => req('GET', '/deletion-requests' + (status ? `?status=${status}` : '')),
+    pendingMap: () => req('GET', '/deletion-requests/pending-map'),
+    count: () => req('GET', '/deletion-requests/count'),
+    approve: (id, note) => req('POST', `/deletion-requests/${id}/approve`, { note }),
+    reject: (id, note) => req('POST', `/deletion-requests/${id}/reject`, { note })
   }
 };

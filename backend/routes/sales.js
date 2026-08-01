@@ -36,14 +36,10 @@ router.post('/', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const pool = await getPool();
-    const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.Sales WHERE Id=@id`);
-    const s = row.recordset[0];
-    if (!s) return res.status(404).json({ error: 'Not found' });
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Sales WHERE Id=@id`);
-    await syncRevShare(pool, s.LeaseId, s.Ym);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const { handleDelete } = require('../lib/deleteGate');
+    const result = await handleDelete('sales', req.params.id, req.user, req.body?.reason);
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 module.exports = router;

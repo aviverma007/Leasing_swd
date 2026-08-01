@@ -76,11 +76,10 @@ router.post('/adhoc', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const pool = await getPool();
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Collections WHERE InvoiceId=@id`);
-    await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.Invoices WHERE Id=@id`);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const { handleDelete } = require('../lib/deleteGate');
+    const result = await handleDelete('invoices', req.params.id, req.user, req.body?.reason);
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 module.exports = router;

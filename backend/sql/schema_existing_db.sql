@@ -238,4 +238,22 @@ CREATE NONCLUSTERED INDEX IX_Disbursals_Month ON leasing.Disbursals(Month);
 CREATE NONCLUSTERED INDEX IX_Disbursals_InvUnit ON leasing.Disbursals(InvestorUnitId);
 GO
 
+
+IF OBJECT_ID('leasing.DeletionRequests','U') IS NULL
+CREATE TABLE leasing.DeletionRequests(
+    Id           VARCHAR(40) PRIMARY KEY,
+    Entity       VARCHAR(40)  NOT NULL,
+    RecordId     VARCHAR(40)  NOT NULL,
+    Label        NVARCHAR(300) NULL,
+    Reason       NVARCHAR(400) NULL,
+    Status       VARCHAR(20)  NOT NULL DEFAULT 'Pending',
+    RequestedBy  NVARCHAR(150) NULL,
+    RequestedRole VARCHAR(50) NULL,
+    RequestedAt  DATETIME2 NOT NULL DEFAULT SYSDATETIME(),
+    DecidedBy    NVARCHAR(150) NULL,
+    DecidedAt    DATETIME2 NULL,
+    DecisionNote NVARCHAR(400) NULL
+);
+GO
+
 PRINT 'LeasingBillingDB schema created successfully.';

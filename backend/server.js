@@ -40,5 +40,8 @@ app.use('/api/investor-units', requireModule('investors'), require('./routes/inv
 app.use('/api/disbursement', requireModule('disbursement'), require('./routes/disbursement'));
 app.use('/api/reports', requireModule('reports'), require('./routes/reports'));
 
+// deletion approval queue (route enforces admin-only for approve/reject internally)
+app.use('/api/deletion-requests', require('./routes/deletionRequests'));
+
 const PORT = process.env.PORT || 5096;
 app.listen(PORT, () => console.log(`Leasing & Billing API listening on port ${PORT}`));

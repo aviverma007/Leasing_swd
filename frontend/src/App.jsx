@@ -16,6 +16,7 @@ const EMPTY_DB = {
 export default function App() {
   const [authUser, setAuthUser] = useState(null); // null = not logged in
   const [db, setDb] = useState(EMPTY_DB);
+  const [pendingDel, setPendingDel] = useState({}); // entity -> [recordIds] with pending deletion
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('dashboard');
   const [search, setSearch] = useState('');
@@ -46,6 +47,7 @@ export default function App() {
         target.forEach((k, i) => { next[k] = results[i]; });
         return next;
       });
+      try { setPendingDel(await api.deletionRequests.pendingMap()); } catch (e) { /* non-fatal */ }
     } catch (e) {
       notify(e.message, true);
     }
@@ -134,12 +136,12 @@ export default function App() {
         <div className="wrap">
           {loading ? <div className="empty"><p>Loading…</p></div> : (
             <ViewRouter view={view} db={db} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
-              actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} />
+              actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} pendingDel={pendingDel} />
           )}
         </div>
       </div>
       {modal && (
-        <ModalRouter modal={modal} db={db} setModal={setModal} refresh={refresh} notify={notify} actingRole={actingRole} />
+        <ModalRouter modal={modal} db={db} setModal={setModal} refresh={refresh} notify={notify} actingRole={actingRole} isAdmin={authUser.isAdmin} />
       )}
       <Toast toast={toast} />
     </div>
@@ -184,13 +186,15 @@ function ViewRouter(props) {
   if (view === 'collections') return <CollectionsPage {...props} />;
   if (view === 'investors') return <InvestorsPage {...props} />;
   if (view === 'disbursement') return <DisbursementPage {...props} />;
+  if (view === 'deletions') return <DeletionsPage {...props} />;
   if (view === 'reports') return <ReportsPage {...props} />;
   return null;
 }
 
 /* ===================== MASTERS (generic CRUD) ===================== */
-function MasterListPage({ entity, db, search, setSearch, setModal, refresh, notify, canEditView }) {
+function MasterListPage({ entity, db, search, setSearch, setModal, refresh, notify, canEditView, pendingDel }) {
   const sc = MASTER_SCHEMA[entity];
+  const pendingIds = new Set((pendingDel && pendingDel[entity]) || []);
   const rows = (db[entity] || []).filter((r) => !search || JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
 
   const del = async (id) => {
@@ -214,7 +218,7 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
                   <tr key={r.id}>
                     {sc.cols(r, db).map((c, i) => <td key={i}>{i === 0 ? <span className="code">{c}</span> : c}</td>)}
                     <td className="rowact">
-                      {canEditView ? (
+                      {pendingIds.has(r.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
                         <>
                           <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'master', entity, id: r.id })}><EditIcon /></button>
                           <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteMaster', entity, id: r.id, name: r.name })}><DelIcon /></button>
@@ -281,44 +285,55 @@ function MasterFormModal({ entity, id, db, onClose, refresh, notify }) {
 }
 
 /* ===================== MODAL ROUTER ===================== */
-function ModalRouter({ modal, db, setModal, refresh, notify, actingRole }) {
+function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin }) {
   const close = () => setModal(null);
+  // Shared delete handler: shows "deleted" for admin, "request sent" for others.
+  const doDelete = async (removeFn, refreshKeys) => {
+    try {
+      const res = await removeFn();
+      await refresh(refreshKeys);
+      if (res && res.pending) notify('Deletion request sent for admin approval.');
+      else notify('Deleted.');
+    } catch (e) { notify(e.message, true); }
+    close();
+  };
+  const delNote = isAdmin ? '' : ' This will be sent to an admin for approval.';
   switch (modal.type) {
     case 'master':
       return <MasterFormModal entity={modal.entity} id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'confirmDeleteMaster':
       return <ConfirmModal title={`Delete this ${MASTER_SCHEMA[modal.entity].sing.toLowerCase()}?`}
-        message={`This will remove "${modal.name}" permanently.`} onClose={close}
-        onConfirm={async () => { try { await api[modal.entity].remove(modal.id); await refresh([modal.entity]); notify('Deleted.'); } catch (e) { notify(e.message, true); } close(); }} />;
+        message={`This will remove "${modal.name}" permanently.` + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
+        onConfirm={() => doDelete(() => api[modal.entity].remove(modal.id), [modal.entity])} />;
     case 'lease':
       return <LeaseFormModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'holdLease':
       return <HoldLeaseModal id={modal.id} onClose={close} refresh={refresh} notify={notify} />;
     case 'confirmDeleteLease':
-      return <ConfirmModal title="Delete this lease?" message="Unpaid invoices for it will also be removed." onClose={close}
-        onConfirm={async () => { try { await api.leases.remove(modal.id); await refresh(['leases', 'invoices', 'units']); notify('Lease deleted.'); } catch (e) { notify(e.message, true); } close(); }} />;
+      return <ConfirmModal title="Delete this lease?" message={"Unpaid invoices for it will also be removed." + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
+        onConfirm={() => doDelete(() => api.leases.remove(modal.id), ['leases', 'invoices', 'units'])} />;
     case 'sales':
       return <SalesFormModal db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'confirmDeleteSales':
-      return <ConfirmModal title="Delete this sales entry?" message="The linked rev-share invoice will be recalculated." onClose={close}
-        onConfirm={async () => { try { await api.sales.remove(modal.id); await refresh(['sales', 'invoices']); notify('Deleted.'); } catch (e) { notify(e.message, true); } close(); }} />;
+      return <ConfirmModal title="Delete this sales entry?" message={"The linked rev-share invoice will be recalculated." + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
+        onConfirm={() => doDelete(() => api.sales.remove(modal.id), ['sales', 'invoices'])} />;
     case 'generate':
       return <GenerateInvoiceModal db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'viewInvoice':
       return <ViewInvoiceModal id={modal.id} db={db} onClose={close} />;
     case 'confirmDeleteInvoice':
-      return <ConfirmModal title="Delete this invoice?" message="Any collections against it will also be removed." onClose={close}
-        onConfirm={async () => { try { await api.invoices.remove(modal.id); await refresh(['invoices', 'collections']); notify('Invoice deleted.'); } catch (e) { notify(e.message, true); } close(); }} />;
+      return <ConfirmModal title="Delete this invoice?" message={"Any collections against it will also be removed." + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
+        onConfirm={() => doDelete(() => api.invoices.remove(modal.id), ['invoices', 'collections'])} />;
     case 'collection':
       return <CollectionFormModal invoiceId={modal.invoiceId} db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'confirmDeleteCollection':
-      return <ConfirmModal title="Delete this collection?" message="" onClose={close}
-        onConfirm={async () => { try { await api.collections.remove(modal.id); await refresh(['collections', 'invoices']); notify('Deleted.'); } catch (e) { notify(e.message, true); } close(); }} />;
+      return <ConfirmModal title="Delete this collection?" message={"This receipt will be removed." + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
+        onConfirm={() => doDelete(() => api.collections.remove(modal.id), ['collections', 'invoices'])} />;
     case 'investor':
       return <InvestorFormModal id={modal.id} db={db} actingRole={actingRole} onClose={close} refresh={refresh} notify={notify} />;
     case 'confirmDeleteInvestor':
-      return <ConfirmModal title="Delete this investor unit?" message="" onClose={close}
-        onConfirm={async () => { try { await api.investorUnits.remove(modal.id); await refresh(['investorUnits']); notify('Deleted.'); } catch (e) { notify(e.message, true); } close(); }} />;
+      return <ConfirmModal title="Delete this investor unit?" message={"This investor unit will be removed." + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
+        onConfirm={() => doDelete(() => api.investorUnits.remove(modal.id), ['investorUnits'])} />;
     case 'disburse':
       return <DisburseFormModal candidate={modal.candidate} ym={modal.ym} actingRole={actingRole} onClose={close} refresh={refresh} notify={notify} />;
     case 'voidDisb':
@@ -1212,6 +1227,71 @@ function ViewDisbModal({ disb: d, db, onClose }) {
 }
 
 /* ===================== REPORTS ===================== */
+function DeletionsPage({ refresh, notify }) {
+  const [tab, setTab] = useState('Pending');
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setRows(await api.deletionRequests.list(tab)); }
+    catch (e) { notify(e.message, true); }
+    setLoading(false);
+  }, [tab]); // eslint-disable-line
+  useEffect(() => { load(); }, [load]);
+
+  const decide = async (id, action) => {
+    try {
+      if (action === 'approve') { await api.deletionRequests.approve(id); notify('Deletion approved — record removed.'); }
+      else { await api.deletionRequests.reject(id); notify('Deletion request rejected.'); }
+      await load();
+      await refresh(); // refresh underlying data + badges
+    } catch (e) { notify(e.message, true); }
+  };
+
+  const ENTITY_LABEL = {
+    companies: 'Company', assets: 'Asset', blocks: 'Block', units: 'Unit', brands: 'Brand', users: 'User',
+    leases: 'Lease', sales: 'Sales', invoices: 'Invoice', collections: 'Collection', investors: 'Investor unit'
+  };
+
+  return (
+    <>
+      <div className="toolbar">
+        {['Pending', 'Approved', 'Rejected'].map((t) => (
+          <button key={t} className={`btn btn-sm ${tab === t ? 'btn-teal' : 'btn-ghost'}`} onClick={() => setTab(t)}>{t}</button>
+        ))}
+      </div>
+      <div className="tablewrap">
+        {loading ? <div className="empty"><p>Loading…</p></div> :
+          rows.length === 0 ? <EmptyMini text={`No ${tab.toLowerCase()} deletion requests.`} /> : (
+            <table>
+              <thead><tr><th>Type</th><th>Record</th><th>Reason</th><th>Requested by</th><th>When</th>{tab === 'Pending' ? <th></th> : <th>Decided by</th>}</tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id}>
+                    <td><Pill color="grey">{ENTITY_LABEL[r.entity] || r.entity}</Pill></td>
+                    <td className="strong">{r.label}</td>
+                    <td className="sub">{r.reason || '—'}</td>
+                    <td>{r.requestedBy}<div className="sub">{r.requestedRole}</div></td>
+                    <td className="sub">{r.requestedAt ? new Date(r.requestedAt).toLocaleString('en-GB') : '—'}</td>
+                    {tab === 'Pending' ? (
+                      <td className="rowact">
+                        <button className="btn btn-teal btn-sm" onClick={() => decide(r.id, 'approve')}>Approve</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => decide(r.id, 'reject')}>Reject</button>
+                      </td>
+                    ) : (
+                      <td>{r.decidedBy || '—'}<div className="sub">{r.decidedAt ? new Date(r.decidedAt).toLocaleString('en-GB') : ''}</div></td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </div>
+    </>
+  );
+}
+
 function ReportsPage({ db, notify }) {
   const [summary, setSummary] = useState(null);
   const [sapRows, setSapRows] = useState([]);

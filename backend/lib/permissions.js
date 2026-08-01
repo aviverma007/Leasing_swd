@@ -5,7 +5,7 @@
    Used by the frontend to gate UI, and available to the backend for enforcement. */
 
 const MODULES = [
-  'dashboard', 'companies', 'assets', 'blocks', 'units', 'brands', 'users',
+  'dashboard', 'deletions', 'companies', 'assets', 'blocks', 'units', 'brands', 'users',
   'leases', 'sales', 'invoices', 'collections', 'investors', 'disbursement', 'reports'
 ];
 
@@ -18,7 +18,7 @@ function row(map) {
 
 const ACCESS = {
   Admin: row({
-    dashboard: 'view', companies: 'edit', assets: 'edit', blocks: 'edit', units: 'edit', brands: 'edit', users: 'edit',
+    dashboard: 'view', deletions: 'edit', companies: 'edit', assets: 'edit', blocks: 'edit', units: 'edit', brands: 'edit', users: 'edit',
     leases: 'edit', sales: 'edit', invoices: 'edit', collections: 'edit', investors: 'edit', disbursement: 'edit', reports: 'view'
   }),
   'Center/Portfolio Head': row({

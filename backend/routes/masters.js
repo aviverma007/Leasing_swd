@@ -140,10 +140,10 @@ function router(entityKey) {
 
   r.delete('/:id', async (req, res) => {
     try {
-      const pool = await getPool();
-      await pool.request().input('id', sql.VarChar(40), req.params.id).query(`DELETE FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
-      res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      const { handleDelete } = require('../lib/deleteGate');
+      const result = await handleDelete(entityKey, req.params.id, req.user, req.body?.reason);
+      res.json(result);
+    } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   return r;
