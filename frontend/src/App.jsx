@@ -4,8 +4,9 @@ import Login from './Login.jsx';
 import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
 import {
   money, money0, fmtDate, ymLabel, curYM, addMonths, nameOf, findById, toCSV, download,
-  CATEGORIES, ROLES, canApprove, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES
+  CATEGORIES, ROLES, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES
 } from './helpers.js';
+import { canView, canEdit, canApproveRole } from './permissions.js';
 
 const EMPTY_DB = {
   companies: [], assets: [], blocks: [], units: [], brands: [], users: [],
@@ -61,10 +62,15 @@ export default function App() {
 
   useEffect(() => { setSearch(''); setFilterVal(''); setRailOpen(false); }, [view]);
 
+  // If the current role can't view the active tab, fall back to dashboard
+  useEffect(() => {
+    if (authUser && !canView(actingRole, view)) setView('dashboard');
+  }, [actingRole, view, authUser]);
+
   const onLogin = (user) => {
     setAuthUser(user);
-    // Admins get Finance-Head-level approval powers by default; others use their own role
-    setActingRole(user.isAdmin ? 'Finance Head' : (user.role || 'Manager'));
+    // Admin operates as the 'Admin' role in the access matrix; others use their profile role
+    setActingRole(user.isAdmin ? 'Admin' : (user.role || 'Manager'));
   };
   const onLogout = () => {
     setToken(null);
@@ -82,7 +88,7 @@ export default function App() {
       <aside className={`rail${railOpen ? ' show' : ''}`}>
         <div className="brand"><div className="logo">S</div><div><h1>ScoopSense</h1><span>Leasing &amp; Billing</span></div></div>
         <nav className="nav">
-          {NAV.filter((n) => n.v !== 'users' || authUser.isAdmin).map((n, i) => n.grp && !n.v ? <div className="grp" key={i}>{n.grp}</div> : (
+          {NAV.filter((n) => !n.v || canView(actingRole, n.v)).map((n, i) => n.grp && !n.v ? <div className="grp" key={i}>{n.grp}</div> : (
             <a key={n.v} className={n.v === view ? 'active' : ''} onClick={() => setView(n.v)}>
               {n.label}
               {db[n.v] && <span className="cnt">{db[n.v].length}</span>}
@@ -94,7 +100,7 @@ export default function App() {
             <>
               <label>Acting as</label>
               <select value={actingRole} onChange={(e) => { setActingRole(e.target.value); notify('Now acting as ' + e.target.value); }}>
-                {ROLES.map((r) => <option key={r}>{r}</option>)}
+                {['Admin', ...ROLES].map((r) => <option key={r}>{r}</option>)}
               </select>
             </>
           ) : (
@@ -111,7 +117,7 @@ export default function App() {
             <svg viewBox="0 0 24 24" width="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h18M3 6h18M3 18h18" /></svg>
           </div>
           <div className="tt"><h2>{page.t}</h2><p>{page.s}</p></div>
-          <PageAction view={view} setModal={setModal} db={db} />
+          <PageAction view={view} setModal={setModal} db={db} actingRole={actingRole} />
           <div className="topbar-user">
             <div className="who"><b>{authUser.email}</b>{authUser.isAdmin ? 'Admin' : authUser.role}</div>
             <button className="btn btn-ghost btn-sm" onClick={onLogout}>Sign out</button>
@@ -120,7 +126,7 @@ export default function App() {
         <div className="wrap">
           {loading ? <div className="empty"><p>Loading…</p></div> : (
             <ViewRouter view={view} db={db} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
-              actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} />
+              actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} />
           )}
         </div>
       </div>
@@ -132,7 +138,9 @@ export default function App() {
   );
 }
 
-function PageAction({ view, setModal, db }) {
+function PageAction({ view, setModal, db, actingRole }) {
+  // No create button unless the role can edit this module
+  if (!canEdit(actingRole, view)) return null;
   const MASTER_KEYS = ['companies', 'assets', 'blocks', 'units', 'brands', 'users'];
   if (MASTER_KEYS.includes(view)) {
     return <button className="btn btn-teal" onClick={() => setModal({ type: 'master', entity: view })}><PlusIcon />New {MASTER_SCHEMA[view].sing.toLowerCase()}</button>;
@@ -173,7 +181,7 @@ function ViewRouter(props) {
 }
 
 /* ===================== MASTERS (generic CRUD) ===================== */
-function MasterListPage({ entity, db, search, setSearch, setModal, refresh, notify }) {
+function MasterListPage({ entity, db, search, setSearch, setModal, refresh, notify, canEditView }) {
   const sc = MASTER_SCHEMA[entity];
   const rows = (db[entity] || []).filter((r) => !search || JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
 
@@ -184,11 +192,12 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
 
   return (
     <>
-      <div className="toolbar">
+      {!canEditView && <Callout>You have view-only access to this section.</Callout>}
+      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
         <SearchBox placeholder={`Search ${sc.sing.toLowerCase()}…`} value={search} onChange={setSearch} />
       </div>
       <div className="tablewrap">
-        {db[entity].length === 0 ? <EmptyState thing={sc.sing} onAdd={() => setModal({ type: 'master', entity })} /> : (
+        {db[entity].length === 0 ? <EmptyState thing={sc.sing} onAdd={canEditView ? () => setModal({ type: 'master', entity }) : null} /> : (
           <table>
             <thead><tr>{sc.head.map((h) => <th key={h}>{h}</th>)}<th></th></tr></thead>
             <tbody>
@@ -197,8 +206,12 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
                   <tr key={r.id}>
                     {sc.cols(r, db).map((c, i) => <td key={i}>{i === 0 ? <span className="code">{c}</span> : c}</td>)}
                     <td className="rowact">
-                      <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'master', entity, id: r.id })}><EditIcon /></button>
-                      <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteMaster', entity, id: r.id, name: r.name })}><DelIcon /></button>
+                      {canEditView ? (
+                        <>
+                          <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'master', entity, id: r.id })}><EditIcon /></button>
+                          <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteMaster', entity, id: r.id, name: r.name })}><DelIcon /></button>
+                        </>
+                      ) : <span className="sub">—</span>}
                     </td>
                   </tr>
                 ))}
@@ -389,7 +402,7 @@ function UnitStatusPill({ s }) {
 }
 
 /* ===================== LEASES ===================== */
-function LeasesPage({ db, search, setSearch, setModal, refresh, notify }) {
+function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditView }) {
   const rows = db.leases.filter((l) => !search || [nameOf(db.brands, l.brandId), nameOf(db.units, l.unitId), l.code].join(' ').toLowerCase().includes(search.toLowerCase()));
   const release = async (id) => {
     try { await api.leases.release(id); await refresh(['leases']); notify('Lease released from hold.'); }
@@ -397,9 +410,10 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify }) {
   };
   return (
     <>
-      <div className="toolbar"><SearchBox placeholder="Search leases, brands, units…" value={search} onChange={setSearch} /></div>
+      {!canEditView && <Callout>You have view-only access to this section.</Callout>}
+      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}><SearchBox placeholder="Search leases, brands, units…" value={search} onChange={setSearch} /></div>
       <div className="tablewrap">
-        {db.leases.length === 0 ? <EmptyState thing="lease" onAdd={() => setModal({ type: 'lease' })} /> : (
+        {db.leases.length === 0 ? <EmptyState thing="lease" onAdd={canEditView ? () => setModal({ type: 'lease' }) : null} /> : (
           <table>
             <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Hold</th><th></th></tr></thead>
             <tbody>
@@ -412,11 +426,15 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify }) {
                   <td className="sub">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
                   <td>{l.onHold ? <Pill color="amber">On hold</Pill> : <Pill color="green">Active</Pill>}</td>
                   <td className="rowact">
-                    {l.onHold
-                      ? <button className="btn btn-ghost btn-sm" onClick={() => release(l.id)}>Release</button>
-                      : <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'holdLease', id: l.id })}>Hold</button>}
-                    <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'lease', id: l.id })}><EditIcon /></button>
-                    <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteLease', id: l.id })}><DelIcon /></button>
+                    {canEditView ? (
+                      <>
+                        {l.onHold
+                          ? <button className="btn btn-ghost btn-sm" onClick={() => release(l.id)}>Release</button>
+                          : <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'holdLease', id: l.id })}>Hold</button>}
+                        <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'lease', id: l.id })}><EditIcon /></button>
+                        <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteLease', id: l.id })}><DelIcon /></button>
+                      </>
+                    ) : <span className="sub">—</span>}
                   </td>
                 </tr>
               ))}
@@ -518,7 +536,7 @@ function HoldLeaseModal({ id, onClose, refresh, notify }) {
 }
 
 /* ===================== SALES ===================== */
-function SalesPage({ db, search, setSearch, setModal, notify }) {
+function SalesPage({ db, search, setSearch, setModal, notify, canEditView }) {
   const rsLeases = db.leases.filter((l) => ['PureRS', 'MGvsRS', 'VarRS'].includes(l.rentalType));
   const rows = db.sales.filter((s) => {
     const l = findById(db.leases, s.leaseId);
@@ -527,10 +545,11 @@ function SalesPage({ db, search, setSearch, setModal, notify }) {
 
   return (
     <>
-      <div className="toolbar"><SearchBox placeholder="Search sales by brand or month…" value={search} onChange={setSearch} /></div>
+      {!canEditView && <Callout>You have view-only access to this section.</Callout>}
+      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}><SearchBox placeholder="Search sales by brand or month…" value={search} onChange={setSearch} /></div>
       <div className="tablewrap">
         {db.sales.length === 0 ? (
-          rsLeases.length ? <EmptyState thing="sales entry" onAdd={() => setModal({ type: 'sales' })} /> : <EmptyMini text="No revenue-share leases yet. Create a Pure-RS or MG-vs-RS lease first." />
+          rsLeases.length ? <EmptyState thing="sales entry" onAdd={canEditView ? () => setModal({ type: 'sales' }) : null} /> : <EmptyMini text="No revenue-share leases yet. Create a Pure-RS or MG-vs-RS lease first." />
         ) : (
           <table>
             <thead><tr><th>Month</th><th>Brand / Lease</th><th>Type</th><th className="num">Reported sales</th><th className="num">Rev share</th><th></th></tr></thead>
@@ -545,7 +564,7 @@ function SalesPage({ db, search, setSearch, setModal, notify }) {
                     <td>{l && <RentTypePill t={l.rentalType} />}</td>
                     <td className="num">{money0(s.amount)}</td>
                     <td className="num strong">{money0(rs)}<div className="sub" style={{ textAlign: 'right' }}>@ {l?.revSharePct}%</div></td>
-                    <td className="rowact"><button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteSales', id: s.id })}><DelIcon /></button></td>
+                    <td className="rowact">{canEditView ? <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteSales', id: s.id })}><DelIcon /></button> : <span className="sub">—</span>}</td>
                   </tr>
                 );
               })}
@@ -591,7 +610,7 @@ function SalesFormModal({ db, onClose, refresh, notify }) {
 }
 
 /* ===================== INVOICES ===================== */
-function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal, notify }) {
+function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal, notify, canEditView }) {
   let rows = db.invoices.filter((i) => !search || [i.no, i.type, nameOf(db.brands, i.brandId), nameOf(db.units, i.unitId)].join(' ').toLowerCase().includes(search.toLowerCase()));
   if (filterVal) rows = rows.filter((i) => i.type === filterVal);
   rows = [...rows].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
@@ -605,7 +624,7 @@ function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal
         </select>
       </div>
       <div className="tablewrap">
-        {db.invoices.length === 0 ? <EmptyState thing="invoice" onAdd={() => setModal({ type: 'generate' })} /> : (
+        {db.invoices.length === 0 ? <EmptyState thing="invoice" onAdd={canEditView ? () => setModal({ type: 'generate' }) : null} /> : (
           <table>
             <thead><tr><th>Invoice</th><th>Type</th><th>Brand / Unit</th><th>Period</th><th className="num">Amount</th><th className="num">GST</th><th className="num">Total</th><th>Status</th><th></th></tr></thead>
             <tbody>
@@ -623,8 +642,8 @@ function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal
                     <button className="iconbtn" title="View e-invoice" onClick={() => setModal({ type: 'viewInvoice', id: i.id })}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>
                     </button>
-                    {i.status !== 'Paid' && <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'collection', invoiceId: i.id })}>Collect</button>}
-                    <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvoice', id: i.id })}><DelIcon /></button>
+                    {canEditView && i.status !== 'Paid' && <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'collection', invoiceId: i.id })}>Collect</button>}
+                    {canEditView && <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvoice', id: i.id })}><DelIcon /></button>}
                   </td>
                 </tr>
               ))}
@@ -737,7 +756,7 @@ function ViewInvoiceModal({ id, db, onClose }) {
 }
 
 /* ===================== COLLECTIONS ===================== */
-function CollectionsPage({ db, search, setSearch, setModal }) {
+function CollectionsPage({ db, search, setSearch, setModal, canEditView }) {
   const rows = db.collections.filter((c) => {
     const inv = findById(db.invoices, c.invoiceId);
     return !search || [c.no, inv?.no, c.ref].join(' ').toLowerCase().includes(search.toLowerCase());
@@ -745,9 +764,10 @@ function CollectionsPage({ db, search, setSearch, setModal }) {
 
   return (
     <>
-      <div className="toolbar"><SearchBox placeholder="Search collections…" value={search} onChange={setSearch} /></div>
+      {!canEditView && <Callout>You have view-only access to this section.</Callout>}
+      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}><SearchBox placeholder="Search collections…" value={search} onChange={setSearch} /></div>
       <div className="tablewrap">
-        {db.collections.length === 0 ? <EmptyState thing="collection" onAdd={() => setModal({ type: 'collection' })} /> : (
+        {db.collections.length === 0 ? <EmptyState thing="collection" onAdd={canEditView ? () => setModal({ type: 'collection' }) : null} /> : (
           <table>
             <thead><tr><th>Receipt</th><th>Invoice</th><th>Date</th><th className="num">Amount</th><th className="num">TDS</th><th>Instrument</th><th>Ref</th><th></th></tr></thead>
             <tbody>
@@ -762,7 +782,7 @@ function CollectionsPage({ db, search, setSearch, setModal }) {
                     <td className="num sub">{money0(c.tds)}</td>
                     <td><Pill color="grey">{c.instrument}</Pill></td>
                     <td className="sub">{c.ref || '—'}</td>
-                    <td className="rowact"><button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteCollection', id: c.id })}><DelIcon /></button></td>
+                    <td className="rowact">{canEditView ? <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteCollection', id: c.id })}><DelIcon /></button> : <span className="sub">—</span>}</td>
                   </tr>
                 );
               })}
@@ -834,20 +854,22 @@ function CollectionFormModal({ invoiceId, db, onClose, refresh, notify }) {
 }
 
 /* ===================== INVESTOR UNITS (maker-checker) ===================== */
-function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, notify }) {
+function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, notify, canEditView }) {
   const rows = db.investorUnits.filter((iv) => !search || [iv.code, nameOf(db.units, iv.unitId), iv.investors.map((x) => x.name).join(' ')].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const mayApprove = canApproveRole(actingRole);
   const approve = async (id) => {
     try { await api.investorUnits.approve(id, actingRole); await refresh(['investorUnits']); notify('Investor unit approved.'); }
     catch (e) { notify(e.message, true); }
   };
   return (
     <>
-      {!canApprove(actingRole) && (
-        <Callout warn>You're acting as <b>{actingRole}</b> (maker). New/edited investor units need approval by a Finance or Portfolio Head. Switch role at the bottom-left to approve.</Callout>
+      {canEditView && !mayApprove && (
+        <Callout warn>You're acting as <b>{actingRole}</b> (maker). New/edited investor units need approval by an Admin, Finance or Portfolio Head.</Callout>
       )}
+      {!canEditView && <Callout>You have view-only access to this section.</Callout>}
       <div className="toolbar" style={{ marginTop: 14 }}><SearchBox placeholder="Search investor units…" value={search} onChange={setSearch} /></div>
       <div className="tablewrap">
-        {db.investorUnits.length === 0 ? <EmptyState thing="investor unit" onAdd={() => setModal({ type: 'investor' })} /> : (
+        {db.investorUnits.length === 0 ? <EmptyState thing="investor unit" onAdd={canEditView ? () => setModal({ type: 'investor' }) : null} /> : (
           <table>
             <thead><tr><th>Ref</th><th>Unit</th><th>Investors</th><th className="num">Ownership</th><th>Status</th><th></th></tr></thead>
             <tbody>
@@ -863,9 +885,13 @@ function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, n
                     <td className="num">{iv.investors.map((x) => `${x.disbursePct}%`).join(' / ')}</td>
                     <td>{iv.status === 'Approved' ? <Pill color="green">Approved</Pill> : <Pill color="amber">Pending</Pill>}</td>
                     <td className="rowact">
-                      {iv.status === 'Pending' && canApprove(actingRole) && <button className="btn btn-teal btn-sm" onClick={() => approve(iv.id)}>Approve</button>}
-                      <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'investor', id: iv.id })}><EditIcon /></button>
-                      <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvestor', id: iv.id })}><DelIcon /></button>
+                      {iv.status === 'Pending' && mayApprove && <button className="btn btn-teal btn-sm" onClick={() => approve(iv.id)}>Approve</button>}
+                      {canEditView ? (
+                        <>
+                          <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'investor', id: iv.id })}><EditIcon /></button>
+                          <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvestor', id: iv.id })}><DelIcon /></button>
+                        </>
+                      ) : (!mayApprove && <span className="sub">—</span>)}
                     </td>
                   </tr>
                 );
@@ -943,7 +969,7 @@ function InvestorFormModal({ id, db, actingRole, onClose, refresh, notify }) {
 }
 
 /* ===================== DISBURSEMENT ===================== */
-function DisbursementPage({ db, filterVal, setFilterVal, setModal, notify, actingRole, refresh }) {
+function DisbursementPage({ db, filterVal, setFilterVal, setModal, notify, actingRole, refresh, canEditView }) {
   const ym = filterVal || addMonths(curYM(), -1);
   const [cands, setCands] = useState({ pending: [], done: [] });
   const [loadingCands, setLoadingCands] = useState(true);
@@ -1002,7 +1028,7 @@ function DisbursementPage({ db, filterVal, setFilterVal, setModal, notify, actin
                     <td>{c.nri ? <Pill color="blue">NRI 31.2%</Pill> : <Pill color="grey">2%</Pill>}</td>
                     <td>{c.holdReason ? <Pill color="amber">On hold</Pill> : <Pill color="teal">Ready</Pill>}</td>
                     <td className="rowact">
-                      {c.holdReason
+                      {!canEditView ? <span className="sub">—</span> : c.holdReason
                         ? <button className="btn btn-ghost btn-sm" title={c.holdReason} disabled style={{ opacity: .5 }}>Blocked</button>
                         : <button className="btn btn-teal btn-sm" onClick={() => setModal({ type: 'disburse', candidate: c, ym })}>Process</button>}
                     </td>
@@ -1028,11 +1054,11 @@ function DisbursementPage({ db, filterVal, setFilterVal, setModal, notify, actin
                     <td className="num strong">{money0(d.netPayable)}</td>
                     <td><DisbStatusPill st={d.status} /></td>
                     <td className="rowact">
-                      {d.status === 'Pending' && canApprove(actingRole) && <button className="btn btn-teal btn-sm" onClick={async () => { try { await api.disbursement.approve(d.id, actingRole); load(); await refresh(['disbursals']); notify('Disbursal approved.'); } catch (e) { notify(e.message, true); } }}>Approve</button>}
+                      {d.status === 'Pending' && canApproveRole(actingRole) && <button className="btn btn-teal btn-sm" onClick={async () => { try { await api.disbursement.approve(d.id, actingRole); load(); await refresh(['disbursals']); notify('Disbursal approved.'); } catch (e) { notify(e.message, true); } }}>Approve</button>}
                       <button className="iconbtn" title="Voucher" onClick={() => setModal({ type: 'viewDisb', disb: d })}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 2h16v20l-3-2-3 2-2-2-2 2-3-2-3 2zM8 8h8M8 12h5" /></svg>
                       </button>
-                      {d.status !== 'Void' && <button className="iconbtn danger" title="Void" onClick={() => setModal({ type: 'voidDisb', id: d.id })}>
+                      {canEditView && d.status !== 'Void' && <button className="iconbtn danger" title="Void" onClick={() => setModal({ type: 'voidDisb', id: d.id })}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="m4.9 4.9 14.2 14.2" /></svg>
                       </button>}
                     </td>
@@ -1076,7 +1102,7 @@ function DisburseFormModal({ candidate: c, ym, actingRole, onClose, refresh, not
         tdsPct: +tdsPct, outstanding: out, mode, ref, narration: narr, remarks, actingRole
       });
       await refresh(['disbursals']);
-      notify(canApprove(actingRole) ? `Disbursed ${money0(net)} to ${c.investorName}.` : 'Disbursal created — awaiting approval.');
+      notify(canApproveRole(actingRole) ? `Disbursed ${money0(net)} to ${c.investorName}.` : 'Disbursal created — awaiting approval.');
       onClose();
     } catch (e) { notify(e.message, true); }
   };
