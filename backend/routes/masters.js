@@ -39,6 +39,8 @@ const ENTITIES = {
 // Columns that must be bound as numbers (SQL Server rejects strings for these)
 const INT_COLS = new Set(['TotalFloors', 'Floor']);
 const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea']);
+// NOT NULL columns with sensible defaults when the form omits them
+const DEFAULTS = { Status: 'Vacant', Active: 'Active' };
 
 // Bind a value with the correct SQL type; empty/blank numerics become NULL, not ''
 function bindValue(request, param, col, value) {
@@ -49,7 +51,9 @@ function bindValue(request, param, col, value) {
     const n = value === '' || value === null || value === undefined ? null : parseFloat(value);
     request.input(param, sql.Decimal(18, 2), Number.isNaN(n) ? null : n);
   } else {
-    request.input(param, value ?? null);
+    let v = value;
+    if ((v === undefined || v === null || v === '') && col in DEFAULTS) v = DEFAULTS[col];
+    request.input(param, v ?? null);
   }
 }
 
