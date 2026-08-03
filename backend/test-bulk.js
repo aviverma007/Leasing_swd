@@ -1,3 +1,5 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 /* Bulk TEST data — populates 3-4+ records in EVERY tab, via the running API.
    Backend must be running (npm start).  Run:  node test-bulk.js
    All records are prefixed [TEST] so they are easy to find and remove.

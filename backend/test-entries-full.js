@@ -1,3 +1,5 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 /* Full end-to-end TEST data covering EVERY module, via the running API.
    Backend must be running (npm start). Run:  node test-entries-full.js
    All records are prefixed [TEST] so they are easy to find and remove.

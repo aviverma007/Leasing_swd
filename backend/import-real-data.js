@@ -6,6 +6,7 @@
 */
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const XLSX = require('xlsx');
 const BASE = `http://localhost:${process.env.PORT || 5096}/api`;
 const ADMIN_ID = process.env.ADMIN_ID || 'admin';

@@ -1,3 +1,5 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 /* Inserts a few clearly-labelled TEST entries by calling the running API.
    The backend must be running first (npm start).
    Run with:  node test-entries.js
