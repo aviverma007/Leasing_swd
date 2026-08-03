@@ -1,6 +1,7 @@
 const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, addM, iso } = require('../lib/helpers');
+const { LEASE_FIELDS, sqlType, coerce, mapExtra } = require('../lib/leaseFields');
 const router = express.Router();
 
 function mgAmount(l, unit) {
@@ -21,7 +22,8 @@ function mapLease(r) {
     startDate: iso(new Date(r.StartDate)), endDate: iso(new Date(r.EndDate)),
     rentalType: r.RentalType, mgBasis: r.MgBasis, mg: Number(r.Mg), revSharePct: Number(r.RevSharePct),
     cam: Number(r.Cam), utility: Number(r.Utility), esc: Number(r.Esc), deposit: Number(r.Deposit),
-    gst: Number(r.Gst), onHold: !!r.OnHold, holdRemarks: r.HoldRemarks, status: r.Status
+    gst: Number(r.Gst), onHold: !!r.OnHold, holdRemarks: r.HoldRemarks, status: r.Status,
+    ...mapExtra(r)
   };
 }
 
@@ -56,8 +58,19 @@ router.post('/', async (req, res) => {
     request.input('esc', sql.Decimal(9, 3), b.esc || 0);
     request.input('deposit', sql.Decimal(18, 2), b.deposit || 0);
     request.input('gst', sql.Decimal(9, 3), b.gst || 0);
-    await request.query(`INSERT INTO ${SCHEMA}.Leases (Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,OnHold,Status)
-      VALUES (@id,@code,@brandId,@unitId,@assetId,@start,@end,@rentalType,@mgBasis,@mg,@revSharePct,@cam,@utility,@esc,@deposit,@gst,0,'Active')`);
+
+    // rich fields (dynamic)
+    const extraCols = [], extraVals = [];
+    for (const f of LEASE_FIELDS) {
+      const [key, col] = f;
+      const pname = 'x_' + col;
+      request.input(pname, sqlType(f), coerce(f, b[key]));
+      extraCols.push(col);
+      extraVals.push('@' + pname);
+    }
+    const colList = 'Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,OnHold,Status' + (extraCols.length ? ',' + extraCols.join(',') : '');
+    const valList = "@id,@code,@brandId,@unitId,@assetId,@start,@end,@rentalType,@mgBasis,@mg,@revSharePct,@cam,@utility,@esc,@deposit,@gst,0,'Active'" + (extraVals.length ? ',' + extraVals.join(',') : '');
+    await request.query(`INSERT INTO ${SCHEMA}.Leases (${colList}) VALUES (${valList})`);
 
     await pool.request().input('id', sql.VarChar(40), b.unitId).query(`UPDATE ${SCHEMA}.Units SET Status='Leased' WHERE Id=@id`);
 
@@ -83,8 +96,21 @@ router.put('/:id', async (req, res) => {
     request.input('esc', sql.Decimal(9, 3), b.esc || 0);
     request.input('deposit', sql.Decimal(18, 2), b.deposit || 0);
     request.input('gst', sql.Decimal(9, 3), b.gst || 0);
-    await request.query(`UPDATE ${SCHEMA}.Leases SET BrandId=@brandId, StartDate=@start, RentalType=@rentalType, MgBasis=@mgBasis,
-      Mg=@mg, RevSharePct=@revSharePct, Cam=@cam, Utility=@utility, Esc=@esc, Deposit=@deposit, Gst=@gst WHERE Id=@id`);
+
+    // rich fields: only update keys actually present in the payload
+    const extraSets = [];
+    for (const f of LEASE_FIELDS) {
+      const [key, col] = f;
+      if (Object.prototype.hasOwnProperty.call(b, key)) {
+        const pname = 'x_' + col;
+        request.input(pname, sqlType(f), coerce(f, b[key]));
+        extraSets.push(`${col}=@${pname}`);
+      }
+    }
+    const baseSets = `BrandId=@brandId, StartDate=@start, RentalType=@rentalType, MgBasis=@mgBasis,
+      Mg=@mg, RevSharePct=@revSharePct, Cam=@cam, Utility=@utility, Esc=@esc, Deposit=@deposit, Gst=@gst`;
+    const setClause = baseSets + (extraSets.length ? ', ' + extraSets.join(', ') : '');
+    await request.query(`UPDATE ${SCHEMA}.Leases SET ${setClause} WHERE Id=@id`);
     const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
     res.json(mapLease(row.recordset[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }

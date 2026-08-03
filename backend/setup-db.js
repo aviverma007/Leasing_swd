@@ -96,6 +96,22 @@ async function run() {
   }
   console.log(`✓ Schema applied (${applied} batch(es) processed).`);
 
+  // 2b) Apply incremental migrations (idempotent) so existing installs get new columns/tables
+  const migrations = ['add_unit_owner.sql', 'user_pwd_meta.sql', 'deletion_requests.sql', 'lease_rich_fields.sql'];
+  for (const mig of migrations) {
+    const mpath = path.join(__dirname, 'sql', mig);
+    if (!fs.existsSync(mpath)) continue;
+    const msql = fs.readFileSync(mpath, 'utf8');
+    for (const batch of splitBatches(msql)) {
+      try { await pool.request().query(batch); }
+      catch (e) {
+        if (/already an object named|already exists|There is already|Column names in each table/i.test(e.message)) continue;
+        console.error(`  ! ${mig}:`, e.message.split('\n')[0]);
+      }
+    }
+    console.log(`✓ Migration applied: ${mig}`);
+  }
+
   // 3) Verify: list only THIS app's tables (in the configured schema)
   const tables = await pool.request().query(
     `SELECT t.name FROM sys.tables t

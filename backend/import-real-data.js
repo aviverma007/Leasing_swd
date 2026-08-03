@@ -1,104 +1,18 @@
-/* Import real Orchard Street leasing data from the Excel, replacing TEST data.
-   Prereqs: backend running (npm start), ADMIN_ID/ADMIN_PASSWORD in .env,
-            openpyxl-parsed parsed_units.json present (regenerated below if missing).
-   Run:  node import-real-data.js
-   Steps: 1) log in as admin  2) delete all [TEST] records  3) create masters + units + leases
+/* FULL import of Orchard Street leasing data from the Excel, populating the complete
+   field set from both sheets ('Latest Customer Data' + 'BRAND Final Data').
+   Prereqs: DB reset (npm run reset-leasing), backend running, ADMIN creds in .env,
+            import_source.xlsx in this folder, migrations applied (npm run setup-db).
+   Run:  npm run import-real
 */
-const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
+const fs = require('fs');
 const XLSX = require('xlsx');
+
 const BASE = `http://localhost:${process.env.PORT || 5096}/api`;
 const ADMIN_ID = process.env.ADMIN_ID || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 let TOKEN = '';
-
-// ---- parse the Excel ('Latest Customer Data' sheet) into unit records ----
-const FLOOR_BLOCK = { 'Ground': 'Ground Floor', '1st': 'First Floor', '2nd': 'Second Floor', '3rd': 'Third Floor' };
-const FLOOR_NUM = { 'Ground': 0, '1st': 1, '2nd': 2, '3rd': 3 };
-
-function rentParse(v) {
-  if (v === null || v === undefined) return { basis: null, mg: 0, note: '' };
-  const s = String(v).trim();
-  if (s === '') return { basis: null, mg: 0, note: '' };
-  if (/^self/i.test(s)) return { basis: null, mg: 0, note: 'self-use' };
-  const m = s.match(/^([\d.]+)\s*\/?-?$/);
-  if (m) return { basis: 'PerSqFt', mg: parseFloat(m[1]), note: '' };
-  const digits = s.replace(/[^\d.]/g, '');
-  if (digits) return { basis: 'PerSqFt', mg: parseFloat(digits), note: '' };
-  return { basis: null, mg: 0, note: s };
-}
-
-// Excel serial date -> ISO
-function serialToISO(n) {
-  if (typeof n !== 'number' || !isFinite(n)) return null;
-  const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
-  const iso = d.toISOString().slice(0, 10);
-  return iso >= '2000-01-01' && iso <= '2100-01-01' ? iso : null;
-}
-// normalize a brand name for fuzzy matching
-function normBrand(s) {
-  return String(s || '').toLowerCase()
-    .replace(/limited|ltd|salon|pharmacies|pharmacy|by studio.*|\(.*\)|[^a-z0-9]/g, '')
-    .trim();
-}
-// Parse 'BRAND Final Data' -> { normalizedBrand: { start, months } }
-function parseBrandTerms(wb) {
-  const ws = wb.Sheets['BRAND Final Data'];
-  if (!ws) return {};
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-  const map = {};
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    const brand = r[3];
-    if (!brand) continue;
-    const start = serialToISO(r[12]);        // As Per Document Lease Commencement Date
-    const tenureYrs = typeof r[27] === 'number' ? r[27] : null;
-    const months = tenureYrs ? Math.round(tenureYrs * 12) : null;
-    const key = normBrand(brand);
-    if (!key) continue;
-    if (!map[key] || (start && !map[key].start)) {
-      map[key] = { start: start || (map[key] && map[key].start) || null, months: months || (map[key] && map[key].months) || null };
-    }
-  }
-  return map;
-}
-
-function parseExcel() {
-  const file = path.join(__dirname, 'import_source.xlsx');
-  if (!fs.existsSync(file)) {
-    console.error(`✗ import_source.xlsx not found in ${__dirname}.`);
-    console.error('  Place the leasing Excel there and rename it to import_source.xlsx, then re-run.');
-    process.exit(1);
-  }
-  const wb = XLSX.readFile(file);
-  const ws = wb.Sheets['Latest Customer Data'];
-  if (!ws) { console.error("✗ Sheet 'Latest Customer Data' not found."); process.exit(1); }
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-  // header is row 0; data from row 1. Columns (0-based): 5=Unit,6=Floor,7=Super,8=Carpet,9=Owner,30=Brand,32=BrandType,45=Rent
-  const out = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    const name = r[5];
-    if (!name) continue;
-    const floorLbl = r[6] ? String(r[6]).trim() : 'Ground';
-    const rent = rentParse(r[45]);
-    out.push({
-      name: String(name).trim(),
-      floor_lbl: floorLbl,
-      floor: FLOOR_NUM[floorLbl] ?? 0,
-      block: FLOOR_BLOCK[floorLbl] || 'Ground Floor',
-      super: r[7] ? Math.round(Number(r[7]) * 100) / 100 : 0,
-      carpet: r[8] ? Math.round(Number(r[8]) * 100) / 100 : 0,
-      owner: r[9] ? String(r[9]).trim() : '',
-      brand: r[30] ? String(r[30]).trim() : '',
-      btype: r[32] ? String(r[32]).trim() : '',
-      basis: rent.basis, mg: rent.mg, note: rent.note
-    });
-  }
-  const brandTerms = parseBrandTerms(wb);
-  return { units: out, brandTerms };
-}
 
 async function call(method, p, body) {
   const headers = {};
@@ -109,156 +23,190 @@ async function call(method, p, body) {
   if (!res.ok) throw new Error(`${method} ${p} -> ${data.error || res.status}`);
   return data;
 }
-
 async function login() {
   if (!ADMIN_PASSWORD) { console.error('✗ ADMIN_PASSWORD not set in .env'); process.exit(1); }
   const r = await call('POST', '/auth/login', { username: ADMIN_ID, password: ADMIN_PASSWORD });
-  TOKEN = r.token;
-  console.log('✓ Logged in as admin');
+  TOKEN = r.token; console.log('✓ Logged in as admin');
 }
 
-// ---- delete all [TEST] records, in FK-safe order ----
-async function clearTest() {
-  console.log('\nClearing [TEST] data...');
-  const isTest = (s) => typeof s === 'string' && s.includes('[TEST]');
+const FLOOR_BLOCK = { 'Ground': 'Ground Floor', '1st': 'First Floor', '2nd': 'Second Floor', '3rd': 'Third Floor' };
+const FLOOR_NUM = { 'Ground': 0, '1st': 1, '2nd': 2, '3rd': 3 };
 
-  // disbursals: void then (admin) delete not supported; they cascade via investor unit delete guard.
-  // Order: sales -> collections -> invoices -> leases -> investor units -> brands -> units -> blocks -> assets -> companies -> users
-  const steps = [
-    ['sales', '/sales', (x, db) => isTest(brandNameForLease(db, x.leaseId))],
-  ];
+function serialToISO(n) {
+  if (typeof n !== 'number' || !isFinite(n)) return null;
+  const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+  const iso = d.toISOString().slice(0, 10);
+  return iso >= '2000-01-01' && iso <= '2100-01-01' ? iso : null;
+}
+function asDate(v) { return serialToISO(v) || null; }
+function asNum(v) { if (v == null || v === '') return null; const n = Number(String(v).replace(/[^\d.\-]/g, '')); return isFinite(n) ? n : null; }
+function asStr(v) { if (v == null) return null; const s = String(v).trim(); return s === '' ? null : s; }
+function normBrand(s) { return String(s || '').toLowerCase().replace(/limited|ltd|salon|pharmacies|pharmacy|by studio.*|\(.*\)|[^a-z0-9]/g, '').trim(); }
 
-  // Simpler & robust: pull everything, then delete by [TEST] markers with dependency order.
-  const [companies, assets, blocks, units, brands, users, leases, sales, invoices, collections, investorUnits, disbursals] =
-    await Promise.all(['companies','assets','blocks','units','brands','users','leases','sales','invoices','collections','investor-units','disbursement']
-      .map(p => call('GET', '/' + p).catch(() => [])));
+function rentParse(v) {
+  if (v == null) return { basis: null, mg: 0 };
+  const s = String(v).trim();
+  if (s === '' || /^self/i.test(s)) return { basis: null, mg: 0 };
+  const m = s.match(/^([\d.]+)\s*\/?-?$/);
+  if (m) return { basis: 'PerSqFt', mg: parseFloat(m[1]) };
+  const digits = s.replace(/[^\d.]/g, '');
+  return digits ? { basis: 'PerSqFt', mg: parseFloat(digits) } : { basis: null, mg: 0 };
+}
 
-  const testBrandIds = new Set(brands.filter(b => isTest(b.name)).map(b => b.id));
-  const testUnitIds = new Set(units.filter(u => isTest(u.name)).map(u => u.id));
-  const testLeaseIds = new Set(leases.filter(l => testBrandIds.has(l.brandId) || testUnitIds.has(l.unitId)).map(l => l.id));
-
-  let n = 0;
-  // sales for test leases
-  for (const s of sales) if (testLeaseIds.has(s.leaseId)) { await del('/sales/' + s.id); n++; }
-  // collections for invoices of test leases
-  const testInvoiceIds = new Set(invoices.filter(i => testLeaseIds.has(i.leaseId) || testBrandIds.has(i.brandId)).map(i => i.id));
-  for (const c of collections) if (testInvoiceIds.has(c.invoiceId)) { await del('/collections/' + c.id); n++; }
-  // invoices
-  for (const i of invoices) if (testInvoiceIds.has(i.id)) { await del('/invoices/' + i.id); n++; }
-  // investor units (delete disbursal-linked ones may be blocked; try void first is out of scope — just try)
-  for (const iv of investorUnits) {
-    const anyTestInvestor = (iv.investors || []).some(x => isTest(x.name));
-    if (anyTestInvestor || testUnitIds.has(iv.unitId)) { try { await del('/investor-units/' + iv.id); n++; } catch (e) { console.log('   (skip investor unit ' + iv.code + ': ' + e.message + ')'); } }
+function parseCustomer(wb) {
+  const ws = wb.Sheets['Latest Customer Data'];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const name = r[5];
+    if (!name) continue;
+    const floorLbl = r[6] ? String(r[6]).trim() : 'Ground';
+    const rent = rentParse(r[45]);
+    out.push({
+      name: String(name).trim(),
+      floor: FLOOR_NUM[floorLbl] ?? 0,
+      block: FLOOR_BLOCK[floorLbl] || 'Ground Floor',
+      super: asNum(r[7]) || 0, carpet: asNum(r[8]) || 0,
+      owner: asStr(r[9]) || '', brand: asStr(r[30]) || '', btype: asStr(r[32]) || '',
+      basis: rent.basis, mg: rent.mg,
+      cust: {
+        leasingHod: asStr(r[1]), bookingDate: asDate(r[4]), tcv: asNum(r[10]),
+        calledIncludingTax: asNum(r[11]), channelPartner: asStr(r[13]),
+        physicalPossessionStatus: asStr(r[15]), handoverStatus: asStr(r[16]),
+        customerDocRemarks: asStr(r[21]), availableFor: asStr(r[25]),
+        consentStatus: asStr(r[26]), lms: asStr(r[27]), cdStatus: asStr(r[28]),
+        cdExecutionDate: asDate(r[29]), loiDate: asDate(r[31]), brandStatus: asStr(r[33]),
+        registrationStatus: asStr(r[34]), agreementRegistrationDate: asDate(r[35]),
+        agreementStatus: asStr(r[36]), dealStatus: asStr(r[37]), signedAgreementDate: asDate(r[38]),
+        agreementConsultant: asStr(r[39]), rmName: asStr(r[40]),
+        standardRemarks: asStr(r[44]), detailedRemarks: asStr(r[46])
+      }
+    });
   }
-  // leases
-  for (const l of leases) if (testLeaseIds.has(l.id)) { try { await del('/leases/' + l.id); n++; } catch (e) { console.log('   (skip lease ' + l.code + ': ' + e.message + ')'); } }
-  // brands
-  for (const b of brands) if (testBrandIds.has(b.id)) { await del('/brands/' + b.id); n++; }
-  // units
-  for (const u of units) if (testUnitIds.has(u.id)) { try { await del('/units/' + u.id); n++; } catch (e) { console.log('   (skip unit ' + u.code + ': ' + e.message + ')'); } }
-  // blocks (test blocks)
-  for (const b of blocks) if (isTest(b.name)) { try { await del('/blocks/' + b.id); n++; } catch (e) {} }
-  // assets
-  for (const a of assets) if (isTest(a.name)) { try { await del('/assets/' + a.id); n++; } catch (e) {} }
-  // companies
-  for (const c of companies) if (isTest(c.name)) { try { await del('/companies/' + c.id); n++; } catch (e) {} }
-  // users
-  for (const u of users) if (isTest(u.email)) { try { await del('/users/' + u.id); n++; } catch (e) {} }
-
-  console.log(`✓ Removed ${n} [TEST] record(s)`);
+  return out;
 }
-function brandNameForLease() { return ''; }
-async function del(p) { return call('DELETE', p); } // admin -> immediate delete
 
-// ---- import real data ----
+function parseBrandTerms(wb) {
+  const ws = wb.Sheets['BRAND Final Data'];
+  if (!ws) return {};
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const map = {};
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const brand = r[3];
+    if (!brand) continue;
+    const key = normBrand(brand);
+    if (!key || map[key]) continue;
+    map[key] = {
+      chequeClearanceDate: asDate(r[6]), loiDate: asDate(r[7]), dealApprovalDate: asDate(r[8]),
+      agreementSignedBrand: asStr(r[9]), agreementSignedInvestor: asStr(r[10]),
+      agreementRegistrationDate: asDate(r[11]), docLeaseCommencementDate: asDate(r[12]),
+      actualHandoverDate: asDate(r[13]), docOperationalDate: asDate(r[14]),
+      actualOperationalDate: asDate(r[15]), docRentCommencementDate: asDate(r[16]),
+      actualRcdDate: asDate(r[17]), channelPartner: asStr(r[18]), rmName: asStr(r[19]),
+      stage: asStr(r[20]), operationalStatus: asStr(r[21]), percentWork: asNum(r[22]),
+      loanRs: asNum(r[23]), capex: asNum(r[24]), capexReleased: asNum(r[25]), capexDue: asNum(r[26]),
+      tenureYears: asNum(r[27]), lockinMonths: asNum(r[28]), minGuaranteePsf: asNum(r[29]),
+      sdRate: asNum(r[30]), sdSchedule: asStr(r[31]), securityDeposit: asNum(r[32]),
+      sdDue: asNum(r[33]), sdReceived: asNum(r[34]), sdBalance: asNum(r[35]), sdFutureDue: asNum(r[36]),
+      camSchedule: asStr(r[37]), camDeposit: asNum(r[38]), camDue: asNum(r[39]),
+      camReceived: asNum(r[40]), camBalance: asNum(r[41]), camFutureDue: asNum(r[42]),
+      revenueSharePct: asNum(r[43]), fitoutPeriod: asStr(r[44]), brokerageTerms: asStr(r[45]),
+      brokerageDisbursal: asStr(r[46]), brokerageRate: asNum(r[47]), brokerageAmount: asNum(r[48]),
+      brokerageDue: asNum(r[49]), brokeragePaid: asNum(r[50]), brokerageBalance: asNum(r[51]),
+      futureBrokerage: asNum(r[52]), dealWith: asStr(r[56]), billingRemarks: asStr(r[57]), category: asStr(r[59])
+    };
+  }
+  return map;
+}
+
+function loadWorkbook() {
+  const file = path.join(__dirname, 'import_source.xlsx');
+  if (!fs.existsSync(file)) {
+    console.error(`✗ import_source.xlsx not found in ${__dirname}. Copy your Excel there (renamed) and re-run.`);
+    process.exit(1);
+  }
+  return XLSX.readFile(file);
+}
+function clean(obj) { const o = {}; for (const [k, v] of Object.entries(obj)) if (v !== null && v !== undefined && v !== '') o[k] = v; return o; }
+
 async function importReal() {
-  const { units, brandTerms } = parseExcel();
-  console.log(`\nImporting ${units.length} units from Orchard Street...`);
-  console.log(`  (loaded real lease terms for ${Object.keys(brandTerms).length} brand(s) from 'BRAND Final Data')`);
+  const wb = loadWorkbook();
+  const units = parseCustomer(wb);
+  const brandTerms = parseBrandTerms(wb);
+  console.log(`\nParsed ${units.length} units; brand-terms for ${Object.keys(brandTerms).length} brand(s).`);
 
-  // 1) Company
   const company = await call('POST', '/companies', { name: 'Smart World Developers' });
-  console.log('✓ Company:', company.code);
-
-  // 2) Asset
   const asset = await call('POST', '/assets', { name: 'Orchard Street', city: 'Gurgaon' });
-  console.log('✓ Asset:', asset.code);
+  console.log('✓ Company + Asset created');
 
-  // 3) Blocks (floors)
-  const blockDefs = [['Ground Floor', 0], ['First Floor', 1], ['Second Floor', 2], ['Third Floor', 3]];
   const blockByName = {};
-  for (const [bn, fl] of blockDefs) {
+  for (const bn of ['Ground Floor', 'First Floor', 'Second Floor', 'Third Floor']) {
     const b = await call('POST', '/blocks', { name: bn, assetId: asset.id, totalFloors: 1 });
     blockByName[bn] = b.id;
   }
-  console.log('✓ Blocks:', Object.keys(blockByName).join(', '));
+  console.log('✓ 4 floor-blocks created');
 
-  // 4) Brands (distinct, with type -> category mapping)
   const CAT = { 'F&B': 'F&B', 'Salon': 'Services', 'Health': 'Services', 'Departmental store': 'Other', 'Bank': 'Services', 'Laundry': 'Services', 'Pharmacy': 'Other' };
-  const brandInfo = {};
-  for (const u of units) if (u.brand) brandInfo[u.brand] = brandInfo[u.brand] || (u.btype || 'Other');
+  const brandTypeByName = {};
+  for (const u of units) if (u.brand) brandTypeByName[u.brand] = brandTypeByName[u.brand] || (u.btype || 'Other');
   const brandByName = {};
-  for (const [bname, btype] of Object.entries(brandInfo)) {
+  for (const [bname, btype] of Object.entries(brandTypeByName)) {
     const b = await call('POST', '/brands', { name: bname, companyId: company.id, category: CAT[btype] || 'Other', regularAddress: '', address: 'Orchard Street, Gurgaon' });
     brandByName[bname] = b.id;
   }
-  console.log(`✓ Brands: ${Object.keys(brandByName).length}`);
+  console.log(`✓ ${Object.keys(brandByName).length} brands created`);
 
-  // 5) Units (all 109, with owner + areas + status)
   const unitByName = {};
-  let created = 0;
   for (const u of units) {
     const rec = await call('POST', '/units', {
       name: u.name, assetId: asset.id, blockId: blockByName[u.block] || blockByName['Ground Floor'],
       floor: u.floor, carpetArea: u.carpet, builtupArea: u.super, owner: u.owner
     });
     unitByName[u.name] = rec.id;
-    created++;
   }
-  console.log(`✓ Units: ${created}`);
+  console.log(`✓ ${Object.keys(unitByName).length} units created`);
 
-  // 6) Leases for units that have a brand
-  let leasesMade = 0, selfUse = 0, zeroRent = 0, datedLeases = 0;
   const today = new Date().toISOString().slice(0, 10);
+  let made = 0, dated = 0, withFin = 0;
   for (const u of units) {
     if (!u.brand) continue;
-    const unitId = unitByName[u.name];
-    const brandId = brandByName[u.brand];
+    const unitId = unitByName[u.name]; const brandId = brandByName[u.brand];
     if (!unitId || !brandId) continue;
-    // real terms from BRAND Final Data (fuzzy brand match); fall back to defaults
     const terms = brandTerms[normBrand(u.brand)] || {};
-    const startDate = terms.start || today;
-    const months = terms.months || 36;
-    if (terms.start) datedLeases++;
-    const body = {
+    const startDate = terms.docLeaseCommencementDate || today;
+    const months = terms.tenureYears ? Math.round(terms.tenureYears * 12) : 36;
+    if (terms.docLeaseCommencementDate) dated++;
+    if (terms.securityDeposit || terms.camDeposit) withFin++;
+    const body = clean({
       brandId, unitId, startDate, months,
-      rentalType: 'MG',
-      mgBasis: u.basis === 'PerSqFt' ? 'PerSqFt' : 'Lumpsum',
-      mg: u.mg || 0,
-      revSharePct: 0, cam: 0, utility: 0, esc: 0, deposit: 0, gst: 18
-    };
-    try {
-      await call('POST', '/leases', body);
-      leasesMade++;
-      if (u.note === 'self-use') selfUse++;
-      if (!u.mg) zeroRent++;
-    } catch (e) {
-      console.log(`   (lease skip ${u.name}/${u.brand}: ${e.message})`);
-    }
+      rentalType: 'MG', mgBasis: u.basis === 'PerSqFt' ? 'PerSqFt' : 'Lumpsum', mg: u.mg || 0,
+      revSharePct: terms.revenueSharePct || 0, cam: 0, utility: 0, esc: 0,
+      deposit: terms.securityDeposit || 0, gst: 18, brandType: u.btype,
+      ...clean(u.cust),
+      ...clean(terms),
+      minGuaranteePsf: terms.minGuaranteePsf != null ? terms.minGuaranteePsf : (u.basis === 'PerSqFt' ? u.mg : null)
+    });
+    try { await call('POST', '/leases', body); made++; }
+    catch (e) { console.log(`   (lease skip ${u.name}/${u.brand}: ${e.message})`); }
   }
-  console.log(`✓ Leases: ${leasesMade} (${datedLeases} with real commencement dates/tenure, ${selfUse} self-use, ${zeroRent} with 0 rent to fill)`);
-
-  return { company, asset, blocks: Object.keys(blockByName).length, brands: Object.keys(brandByName).length, units: created, leases: leasesMade };
+  console.log(`✓ ${made} leases created (${dated} with real commencement dates, ${withFin} with SD/CAM financials)`);
+  return { company: company.code, asset: asset.code, blocks: 4, brands: Object.keys(brandByName).length, units: Object.keys(unitByName).length, leases: made };
 }
 
 async function run() {
   try { const h = await call('GET', '/health'); if (!h.ok) throw new Error('health'); }
   catch (e) { console.error('✗ API not reachable — start backend (npm start).\n  ' + e.message); process.exit(1); }
   await login();
-  await clearTest();
+  const existing = await call('GET', '/units').catch(() => []);
+  if (existing.length > 0) {
+    console.error(`\n✗ ${existing.length} units already exist. Run 'npm run reset-leasing' first for a clean import.`);
+    process.exit(1);
+  }
   const summary = await importReal();
   console.log('\n===== IMPORT COMPLETE =====');
   console.log(summary);
-  console.log('\nSign in and review. Rent (₹/sq ft) is set where the Excel had a value; blanks/self-use leases were created at 0 so you can fill them in.');
+  console.log('\nOpen the app -> Leases -> edit any lease to see the full field set across the tabs.');
 }
 run().catch(e => { console.error('\n✗ Error:', e.message); process.exit(1); });

@@ -517,7 +517,7 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
       <div className="tablewrap">
         {db.leases.length === 0 ? <EmptyState thing="lease" onAdd={canEditView ? () => setModal({ type: 'lease' }) : null} /> : (
           <table>
-            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Hold</th><th></th></tr></thead>
+            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Stage</th><th>Hold</th><th></th></tr></thead>
             <tbody>
               {rows.map((l) => (
                 <tr key={l.id}>
@@ -526,6 +526,7 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
                   <td><RentTypePill t={l.rentalType} /></td>
                   <td className="num">{l.mg ? money0(l.mg) : '—'} {l.revSharePct ? `/ ${l.revSharePct}%` : ''}</td>
                   <td className="sub">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
+                  <td>{l.stage ? <Pill color="grey">{l.stage}</Pill> : (l.brandStatus ? <span className="sub">{l.brandStatus}</span> : '—')}</td>
                   <td>{l.onHold ? <Pill color="amber">On hold</Pill> : <Pill color="green">Active</Pill>}</td>
                   <td className="rowact">
                     {pendingIds.has(l.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
@@ -548,16 +549,115 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
   );
 }
 
+// Rich lease field sections — drives the tabbed lease form.
+// Each field: [key, label, type]  where type: 'date'|'num'|'text'|'area'|select-array
+const LEASE_SECTIONS = [
+  ['Booking & Brand', [
+    ['bookingDate', 'Date of booking', 'date'],
+    ['loiDate', 'LOI date', 'date'],
+    ['leasingHod', 'Leasing HOD', 'text'],
+    ['brandStatus', 'Brand status', ['', 'Operational', 'Yet To Be Operational', 'Under Pipe line', 'Cancelled']],
+    ['availableFor', 'Available for', ['', 'Leasing', 'Self Use', 'Self Use(Approved)', 'to be connected']],
+    ['rmName', 'RM name', 'text'],
+    ['channelPartner', 'Channel partner', 'text'],
+    ['category', 'Category', 'text']
+  ]],
+  ['Consent, Possession & TCV', [
+    ['consentStatus', 'Consent status', 'text'],
+    ['lms', 'LMS', 'text'],
+    ['physicalPossessionStatus', 'Physical possession status', 'text'],
+    ['handoverStatus', 'Handover status (possession team)', ['', 'Eligible', 'Not Eligible', 'Handover']],
+    ['tcv', 'TCV (₹)', 'num'],
+    ['calledIncludingTax', 'Called including tax (₹)', 'num']
+  ]],
+  ['Agreement & Registration', [
+    ['cdStatus', 'CD status', 'text'],
+    ['cdExecutionDate', 'CD execution date', 'date'],
+    ['registrationStatus', 'Registration status', 'text'],
+    ['agreementRegistrationDate', 'Agreement registration date', 'date'],
+    ['agreementStatus', 'Agreement status', 'text'],
+    ['dealStatus', 'Status', 'text'],
+    ['signedAgreementDate', 'Date of signed agreement', 'date'],
+    ['agreementConsultant', 'Agreement consultant', 'text'],
+    ['agreementSignedBrand', 'Agreement signed from brand', 'text'],
+    ['agreementSignedInvestor', 'Agreement signed from investor', 'text'],
+    ['dealWith', 'Deal with', 'text']
+  ]],
+  ['Key Dates', [
+    ['chequeClearanceDate', 'Cheque clearance date', 'date'],
+    ['dealApprovalDate', 'Deal approval date', 'date'],
+    ['docLeaseCommencementDate', 'Doc lease commencement / handover', 'date'],
+    ['actualHandoverDate', 'Actual handover date', 'date'],
+    ['docOperationalDate', 'Doc operational date', 'date'],
+    ['actualOperationalDate', 'Actual operational date', 'date'],
+    ['docRentCommencementDate', 'Doc rent commencement date', 'date'],
+    ['actualRcdDate', 'Actual RCD date', 'date']
+  ]],
+  ['Fitout & Capex', [
+    ['stage', 'Stage', ['', 'Fitout', 'Not Fitting Out', 'Operational', 'Cancelled']],
+    ['operationalStatus', 'Operational / Not operational', 'text'],
+    ['percentWork', '% of work', 'num'],
+    ['fitoutPeriod', 'Fitout period', 'text'],
+    ['loanRs', 'Loan (₹)', 'num'],
+    ['capex', 'Capex (₹)', 'num'],
+    ['capexReleased', 'Released (₹)', 'num'],
+    ['capexDue', 'Due (₹)', 'num']
+  ]],
+  ['Tenure & Security Deposit', [
+    ['tenureYears', 'Tenure (yrs)', 'num'],
+    ['lockinMonths', 'Lock-in (months)', 'num'],
+    ['minGuaranteePsf', 'Minimum guarantee (₹/sq ft)', 'num'],
+    ['sdRate', 'SD rate', 'num'],
+    ['sdSchedule', 'SD schedule', 'text'],
+    ['securityDeposit', 'Security deposit (₹)', 'num'],
+    ['sdDue', 'SD due (₹)', 'num'],
+    ['sdReceived', 'SD received (₹)', 'num'],
+    ['sdBalance', 'SD balance (₹)', 'num'],
+    ['sdFutureDue', 'SD future due (₹)', 'num']
+  ]],
+  ['CAM', [
+    ['camSchedule', 'CAM schedule', 'text'],
+    ['camDeposit', 'CAM deposit (₹)', 'num'],
+    ['camDue', 'CAM due (₹)', 'num'],
+    ['camReceived', 'CAM received (₹)', 'num'],
+    ['camBalance', 'CAM balance (₹)', 'num'],
+    ['camFutureDue', 'CAM future due (₹)', 'num']
+  ]],
+  ['Brokerage', [
+    ['brokerageTerms', 'Brokerage terms', 'text'],
+    ['brokerageDisbursal', 'Brokerage disbursal', 'text'],
+    ['brokerageRate', 'Brokerage rate', 'num'],
+    ['brokerageAmount', 'Brokerage amount (₹)', 'num'],
+    ['brokerageDue', 'Brokerage due (₹)', 'num'],
+    ['brokeragePaid', 'Brokerage paid (₹)', 'num'],
+    ['brokerageBalance', 'Balance (₹)', 'num'],
+    ['futureBrokerage', 'Future brokerage (₹)', 'num']
+  ]],
+  ['Remarks', [
+    ['standardRemarks', 'Standard remarks', 'area'],
+    ['detailedRemarks', 'Detailed remarks', 'area'],
+    ['customerDocRemarks', 'Customer documentation remarks', 'area'],
+    ['billingRemarks', 'Remarks from billing', 'area']
+  ]]
+];
+const ALL_LEASE_KEYS = LEASE_SECTIONS.flatMap(([, fs]) => fs.map(f => f[0]));
+
 function LeaseFormModal({ id, db, onClose, refresh, notify }) {
   const existing = id ? findById(db.leases, id) : null;
   const vacantUnits = db.units.filter((u) => u.status !== 'Leased' || (existing && u.id === existing.unitId));
-  const [form, setForm] = useState(() => existing ? {
-    brandId: existing.brandId, unitId: existing.unitId, startDate: existing.startDate, months: 36,
-    rentalType: existing.rentalType, mgBasis: existing.mgBasis, mg: existing.mg, revSharePct: existing.revSharePct,
-    cam: existing.cam, utility: existing.utility, esc: existing.esc, deposit: existing.deposit, gst: existing.gst
-  } : {
-    brandId: db.brands[0]?.id || '', unitId: vacantUnits[0]?.id || '', startDate: new Date().toISOString().slice(0, 10), months: 36,
-    rentalType: 'MG', mgBasis: 'PerSqFt', mg: 70, revSharePct: 8, cam: 20, utility: 12, esc: 5, deposit: '', gst: 18
+  const [tab, setTab] = useState('core');
+  const [form, setForm] = useState(() => {
+    const base = existing ? {
+      brandId: existing.brandId, unitId: existing.unitId, startDate: existing.startDate, months: 36,
+      rentalType: existing.rentalType, mgBasis: existing.mgBasis, mg: existing.mg, revSharePct: existing.revSharePct,
+      cam: existing.cam, utility: existing.utility, esc: existing.esc, deposit: existing.deposit, gst: existing.gst
+    } : {
+      brandId: db.brands[0]?.id || '', unitId: vacantUnits[0]?.id || '', startDate: new Date().toISOString().slice(0, 10), months: 36,
+      rentalType: 'MG', mgBasis: 'PerSqFt', mg: 70, revSharePct: 8, cam: 20, utility: 12, esc: 5, deposit: '', gst: 18
+    };
+    // seed rich fields from the existing lease (or blank)
+    for (const k of ALL_LEASE_KEYS) base[k] = existing && existing[k] != null ? existing[k] : '';
+    return base;
   });
   const set = (k, v) => setForm((s) => ({ ...s, [k]: v }));
 
@@ -573,51 +673,79 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
     } catch (e) { notify(e.message, true); }
   };
 
+  const renderField = ([k, label, type]) => {
+    if (Array.isArray(type)) {
+      return <div className="field" key={k}><label>{label}</label>
+        <select value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)}>
+          {type.map((o) => <option key={o} value={o}>{o || '—'}</option>)}
+        </select></div>;
+    }
+    if (type === 'area') return <div className="field" key={k} style={{ gridColumn: '1 / -1' }}><label>{label}</label><textarea value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
+    const inputType = type === 'date' ? 'date' : type === 'num' ? 'number' : 'text';
+    return <div className="field" key={k}><label>{label}</label><input type={inputType} value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
+  };
+
+  const TABS = [['core', 'Rental'], ...LEASE_SECTIONS.map((s, i) => ['s' + i, s[0]])];
+
   return (
     <Modal title={id ? 'Edit lease' : 'New lease'} onClose={onClose} onSave={save} wide>
-      <div className="grp2">
-        <div className="field"><label>Brand <span className="req">*</span></label>
-          <select value={form.brandId} onChange={(e) => set('brandId', e.target.value)}>
-            {db.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+      <div className="lease-tabs">
+        {TABS.map(([v, l]) => <button key={v} type="button" className={`ltab ${tab === v ? 'on' : ''}`} onClick={() => setTab(v)}>{l}</button>)}
+      </div>
+
+      {tab === 'core' && (
+        <div className="lease-pane">
+          <div className="grp2">
+            <div className="field"><label>Brand <span className="req">*</span></label>
+              <select value={form.brandId} onChange={(e) => set('brandId', e.target.value)}>
+                {db.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+            <div className="field"><label>Unit <span className="req">*</span></label>
+              <select value={form.unitId} disabled={!!id} onChange={(e) => set('unitId', e.target.value)}>
+                {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}{u.owner ? ' · owner: ' + u.owner : ''}</option>)}
+              </select>
+            </div>
+          </div>
+          {(() => { const su = findById(db.units, form.unitId); return su && su.owner ? <Callout>Unit owner (customer): <b>{su.owner}</b></Callout> : null; })()}
+          <div className="grp3">
+            <div className="field"><label>Start date <span className="req">*</span></label><input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
+            <div className="field"><label>Term (months)</label><input type="number" value={form.months} disabled={!!id} onChange={(e) => set('months', +e.target.value)} /></div>
+            <div className="field"><label>GST %</label><input type="number" value={form.gst} onChange={(e) => set('gst', +e.target.value)} /></div>
+          </div>
+          <div className="sectlabel">Rental structure</div>
+          <div className="field"><label>Type</label>
+            <select value={form.rentalType} onChange={(e) => set('rentalType', e.target.value)}>
+              {RENTAL_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div className="grp2">
+            <div className="field"><label>MG basis</label>
+              <select value={form.mgBasis} onChange={(e) => set('mgBasis', e.target.value)}>
+                {['Lumpsum', 'PerSqFt'].map((o) => <option key={o}>{o}</option>)}
+              </select>
+            </div>
+            <div className="field"><label>MG amount (₹ lumpsum or ₹/sq ft)</label><input type="number" value={form.mg} onChange={(e) => set('mg', +e.target.value)} /></div>
+          </div>
+          <div className="grp2">
+            <div className="field"><label>Revenue share %</label><input type="number" step="0.5" value={form.revSharePct} onChange={(e) => set('revSharePct', +e.target.value)} /></div>
+            <div className="field"><label>Annual escalation %</label><input type="number" step="0.5" value={form.esc} onChange={(e) => set('esc', +e.target.value)} /></div>
+          </div>
+          <div className="grp3">
+            <div className="field"><label>CAM (₹/sq ft b-up)</label><input type="number" value={form.cam} onChange={(e) => set('cam', +e.target.value)} /></div>
+            <div className="field"><label>Utility (₹/sq ft b-up)</label><input type="number" value={form.utility} onChange={(e) => set('utility', +e.target.value)} /></div>
+            <div className="field"><label>Security deposit (₹)</label><input type="number" value={form.deposit} onChange={(e) => set('deposit', +e.target.value)} /></div>
+          </div>
+          <Callout>{RENTAL_HINT[form.rentalType]}</Callout>
         </div>
-        <div className="field"><label>Unit <span className="req">*</span></label>
-          <select value={form.unitId} disabled={!!id} onChange={(e) => set('unitId', e.target.value)}>
-            {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}{u.owner ? ' · owner: ' + u.owner : ''}</option>)}
-          </select>
+      )}
+
+      {LEASE_SECTIONS.map((sec, i) => tab === ('s' + i) && (
+        <div className="lease-pane" key={i}>
+          <div className="sectlabel">{sec[0]}</div>
+          <div className="lease-grid">{sec[1].map(renderField)}</div>
         </div>
-      </div>
-      {(() => { const su = findById(db.units, form.unitId); return su && su.owner ? <Callout>Unit owner (customer): <b>{su.owner}</b></Callout> : null; })()}
-      <div className="grp3">
-        <div className="field"><label>Start date <span className="req">*</span></label><input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
-        <div className="field"><label>Term (months)</label><input type="number" value={form.months} disabled={!!id} onChange={(e) => set('months', +e.target.value)} /></div>
-        <div className="field"><label>GST %</label><input type="number" value={form.gst} onChange={(e) => set('gst', +e.target.value)} /></div>
-      </div>
-      <div className="sectlabel">Rental structure</div>
-      <div className="field"><label>Type</label>
-        <select value={form.rentalType} onChange={(e) => set('rentalType', e.target.value)}>
-          {RENTAL_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-      </div>
-      <div className="grp2">
-        <div className="field"><label>MG basis</label>
-          <select value={form.mgBasis} onChange={(e) => set('mgBasis', e.target.value)}>
-            {['Lumpsum', 'PerSqFt'].map((o) => <option key={o}>{o}</option>)}
-          </select>
-        </div>
-        <div className="field"><label>MG amount (₹ lumpsum or ₹/sq ft)</label><input type="number" value={form.mg} onChange={(e) => set('mg', +e.target.value)} /></div>
-      </div>
-      <div className="grp2">
-        <div className="field"><label>Revenue share %</label><input type="number" step="0.5" value={form.revSharePct} onChange={(e) => set('revSharePct', +e.target.value)} /></div>
-        <div className="field"><label>Annual escalation %</label><input type="number" step="0.5" value={form.esc} onChange={(e) => set('esc', +e.target.value)} /></div>
-      </div>
-      <div className="sectlabel">CAM, Utility &amp; Deposit</div>
-      <div className="grp3">
-        <div className="field"><label>CAM (₹/sq ft b-up)</label><input type="number" value={form.cam} onChange={(e) => set('cam', +e.target.value)} /></div>
-        <div className="field"><label>Utility (₹/sq ft b-up)</label><input type="number" value={form.utility} onChange={(e) => set('utility', +e.target.value)} /></div>
-        <div className="field"><label>Security deposit (₹)</label><input type="number" value={form.deposit} onChange={(e) => set('deposit', +e.target.value)} /></div>
-      </div>
-      <Callout>{RENTAL_HINT[form.rentalType]}</Callout>
+      ))}
     </Modal>
   );
 }
