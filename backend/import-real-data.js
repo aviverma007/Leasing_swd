@@ -28,6 +28,41 @@ function rentParse(v) {
   return { basis: null, mg: 0, note: s };
 }
 
+// Excel serial date -> ISO
+function serialToISO(n) {
+  if (typeof n !== 'number' || !isFinite(n)) return null;
+  const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+  const iso = d.toISOString().slice(0, 10);
+  return iso >= '2000-01-01' && iso <= '2100-01-01' ? iso : null;
+}
+// normalize a brand name for fuzzy matching
+function normBrand(s) {
+  return String(s || '').toLowerCase()
+    .replace(/limited|ltd|salon|pharmacies|pharmacy|by studio.*|\(.*\)|[^a-z0-9]/g, '')
+    .trim();
+}
+// Parse 'BRAND Final Data' -> { normalizedBrand: { start, months } }
+function parseBrandTerms(wb) {
+  const ws = wb.Sheets['BRAND Final Data'];
+  if (!ws) return {};
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const map = {};
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const brand = r[3];
+    if (!brand) continue;
+    const start = serialToISO(r[12]);        // As Per Document Lease Commencement Date
+    const tenureYrs = typeof r[27] === 'number' ? r[27] : null;
+    const months = tenureYrs ? Math.round(tenureYrs * 12) : null;
+    const key = normBrand(brand);
+    if (!key) continue;
+    if (!map[key] || (start && !map[key].start)) {
+      map[key] = { start: start || (map[key] && map[key].start) || null, months: months || (map[key] && map[key].months) || null };
+    }
+  }
+  return map;
+}
+
 function parseExcel() {
   const file = path.join(__dirname, 'import_source.xlsx');
   if (!fs.existsSync(file)) {
@@ -60,7 +95,8 @@ function parseExcel() {
       basis: rent.basis, mg: rent.mg, note: rent.note
     });
   }
-  return out;
+  const brandTerms = parseBrandTerms(wb);
+  return { units: out, brandTerms };
 }
 
 async function call(method, p, body) {
@@ -135,8 +171,9 @@ async function del(p) { return call('DELETE', p); } // admin -> immediate delete
 
 // ---- import real data ----
 async function importReal() {
-  const units = parseExcel();
+  const { units, brandTerms } = parseExcel();
   console.log(`\nImporting ${units.length} units from Orchard Street...`);
+  console.log(`  (loaded real lease terms for ${Object.keys(brandTerms).length} brand(s) from 'BRAND Final Data')`);
 
   // 1) Company
   const company = await call('POST', '/companies', { name: 'Smart World Developers' });
@@ -180,16 +217,20 @@ async function importReal() {
   console.log(`✓ Units: ${created}`);
 
   // 6) Leases for units that have a brand
-  let leasesMade = 0, selfUse = 0, zeroRent = 0;
+  let leasesMade = 0, selfUse = 0, zeroRent = 0, datedLeases = 0;
   const today = new Date().toISOString().slice(0, 10);
   for (const u of units) {
     if (!u.brand) continue;
     const unitId = unitByName[u.name];
     const brandId = brandByName[u.brand];
     if (!unitId || !brandId) continue;
-    // rent interpretation: PerSqFt with mg value; self-use / blank -> MG 0
+    // real terms from BRAND Final Data (fuzzy brand match); fall back to defaults
+    const terms = brandTerms[normBrand(u.brand)] || {};
+    const startDate = terms.start || today;
+    const months = terms.months || 36;
+    if (terms.start) datedLeases++;
     const body = {
-      brandId, unitId, startDate: today, months: 36,
+      brandId, unitId, startDate, months,
       rentalType: 'MG',
       mgBasis: u.basis === 'PerSqFt' ? 'PerSqFt' : 'Lumpsum',
       mg: u.mg || 0,
@@ -204,7 +245,7 @@ async function importReal() {
       console.log(`   (lease skip ${u.name}/${u.brand}: ${e.message})`);
     }
   }
-  console.log(`✓ Leases: ${leasesMade} (of which ${selfUse} self-use, ${zeroRent} with 0 rent / to be set)`);
+  console.log(`✓ Leases: ${leasesMade} (${datedLeases} with real commencement dates/tenure, ${selfUse} self-use, ${zeroRent} with 0 rent to fill)`);
 
   return { company, asset, blocks: Object.keys(blockByName).length, brands: Object.keys(brandByName).length, units: created, leases: leasesMade };
 }
