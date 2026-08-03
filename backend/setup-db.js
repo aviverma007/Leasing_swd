@@ -97,7 +97,7 @@ async function run() {
   console.log(`✓ Schema applied (${applied} batch(es) processed).`);
 
   // 2b) Apply incremental migrations (idempotent) so existing installs get new columns/tables
-  const migrations = ['add_unit_owner.sql', 'user_pwd_meta.sql', 'deletion_requests.sql', 'lease_rich_fields.sql'];
+  const migrations = ['add_unit_owner.sql', 'user_pwd_meta.sql', 'deletion_requests.sql', 'lease_rich_fields.sql', 'brand_terms_fields.sql'];
   for (const mig of migrations) {
     const mpath = path.join(__dirname, 'sql', mig);
     if (!fs.existsSync(mpath)) continue;

@@ -72,11 +72,22 @@ export const MASTER_SCHEMA = {
       { k: 'name', l: 'Brand name', req: 1, ph: 'Brewhouse Cafe' },
       { k: 'companyId', l: 'Company', req: 1, ref: 'companies' },
       { k: 'category', l: 'Brand category', type: 'select', opts: CATEGORIES },
+      { k: 'brandType', l: 'Brand type', ph: 'F&B / Salon / Bank …' },
+      { k: 'unitRef', l: 'Unit ref (from deal sheet)', ph: 'e.g. G-06 & G-07' },
+      { k: 'stage', l: 'Stage', ph: 'Fitout / Operational …' },
+      { k: 'tenureYears', l: 'Tenure (yrs)', type: 'number' },
+      { k: 'lockinMonths', l: 'Lock-in (months)', type: 'number' },
+      { k: 'minGuaranteePsf', l: 'Min guarantee (₹/sq ft)', type: 'number' },
+      { k: 'securityDeposit', l: 'Security deposit (₹)', type: 'number' },
+      { k: 'docLeaseCommencementDate', l: 'Lease commencement date', type: 'date' },
+      { k: 'brokerageTerms', l: 'Brokerage terms', ph: 'e.g. 1 month rent' },
+      { k: 'dealWith', l: 'Deal with', ph: 'Counterparty' },
       { k: 'regularAddress', l: 'Registered address', type: 'textarea', ph: 'Registered office address' },
-      { k: 'address', l: 'Site / correspondence address', type: 'textarea', ph: 'Store address at asset' }
+      { k: 'address', l: 'Site / correspondence address', type: 'textarea', ph: 'Store address at asset' },
+      { k: 'billingRemarks', l: 'Remarks', type: 'textarea' }
     ],
-    head: ['Code', 'Brand', 'Company', 'Category'],
-    cols: (r, db) => [r.code, r.name, nameOf(db.companies, r.companyId), r.category || '—']
+    head: ['Code', 'Brand', 'Company', 'Type', 'Stage', 'Tenure', 'SD (₹)'],
+    cols: (r, db) => [r.code, r.name, nameOf(db.companies, r.companyId), r.brandType || r.category || '—', r.stage || '—', r.tenureYears ? r.tenureYears + ' yr' : '—', r.securityDeposit ? (+r.securityDeposit).toLocaleString('en-IN') : '—']
   },
   users: {
     sing: 'User',

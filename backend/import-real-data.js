@@ -89,16 +89,19 @@ function parseCustomer(wb) {
 
 function parseBrandTerms(wb) {
   const ws = wb.Sheets['BRAND Final Data'];
-  if (!ws) return {};
+  if (!ws) return { byKey: {}, list: [] };
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-  const map = {};
+  const byKey = {}; const list = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     const brand = r[3];
     if (!brand) continue;
-    const key = normBrand(brand);
-    if (!key || map[key]) continue;
-    map[key] = {
+    const name = String(brand).trim();
+    const key = normBrand(name);
+    if (!key || byKey[key]) continue;
+    const terms = {
+      name,
+      project: asStr(r[2]), unitRef: asStr(r[5]), superArea: asNum(r[4]),
       chequeClearanceDate: asDate(r[6]), loiDate: asDate(r[7]), dealApprovalDate: asDate(r[8]),
       agreementSignedBrand: asStr(r[9]), agreementSignedInvestor: asStr(r[10]),
       agreementRegistrationDate: asDate(r[11]), docLeaseCommencementDate: asDate(r[12]),
@@ -117,8 +120,9 @@ function parseBrandTerms(wb) {
       brokerageDue: asNum(r[49]), brokeragePaid: asNum(r[50]), brokerageBalance: asNum(r[51]),
       futureBrokerage: asNum(r[52]), dealWith: asStr(r[56]), billingRemarks: asStr(r[57]), category: asStr(r[59])
     };
+    byKey[key] = terms; list.push(terms);
   }
-  return map;
+  return { byKey, list };
 }
 
 function loadWorkbook() {
@@ -134,8 +138,8 @@ function clean(obj) { const o = {}; for (const [k, v] of Object.entries(obj)) if
 async function importReal() {
   const wb = loadWorkbook();
   const units = parseCustomer(wb);
-  const brandTerms = parseBrandTerms(wb);
-  console.log(`\nParsed ${units.length} units; brand-terms for ${Object.keys(brandTerms).length} brand(s).`);
+  const { byKey: brandTerms, list: brandList } = parseBrandTerms(wb);
+  console.log(`\nParsed ${units.length} units (customer sheet); ${brandList.length} brands (BRAND Final Data).`);
 
   const company = await call('POST', '/companies', { name: 'Smart World Developers' });
   const asset = await call('POST', '/assets', { name: 'Orchard Street', city: 'Gurgaon' });
@@ -148,16 +152,36 @@ async function importReal() {
   }
   console.log('✓ 4 floor-blocks created');
 
+  // ---- Brands: authoritative list from BRAND Final Data (all of them, with terms) ----
+  // brand-type comes from the customer sheet where available (by fuzzy name)
+  const custType = {};
+  for (const u of units) if (u.brand) custType[normBrand(u.brand)] = u.btype || null;
   const CAT = { 'F&B': 'F&B', 'Salon': 'Services', 'Health': 'Services', 'Departmental store': 'Other', 'Bank': 'Services', 'Laundry': 'Services', 'Pharmacy': 'Other' };
-  const brandTypeByName = {};
-  for (const u of units) if (u.brand) brandTypeByName[u.brand] = brandTypeByName[u.brand] || (u.btype || 'Other');
-  const brandByName = {};
-  for (const [bname, btype] of Object.entries(brandTypeByName)) {
-    const b = await call('POST', '/brands', { name: bname, companyId: company.id, category: CAT[btype] || 'Other', regularAddress: '', address: 'Orchard Street, Gurgaon' });
-    brandByName[bname] = b.id;
+  const brandIdByKey = {};
+  for (const t of brandList) {
+    const btype = custType[normBrand(t.name)] || null;
+    const body = clean({
+      name: t.name, companyId: company.id,
+      category: btype ? (CAT[btype] || 'Other') : (t.category || 'Other'),
+      address: 'Orchard Street, Gurgaon',
+      brandType: btype,
+      ...clean(t)   // all the BRAND Final Data terms onto the brand master
+    });
+    const b = await call('POST', '/brands', body);
+    brandIdByKey[normBrand(t.name)] = b.id;
   }
-  console.log(`✓ ${Object.keys(brandByName).length} brands created`);
+  // any brand that appears in the customer sheet but NOT in BRAND Final Data — create it too
+  for (const u of units) {
+    if (!u.brand) continue;
+    const k = normBrand(u.brand);
+    if (!brandIdByKey[k]) {
+      const b = await call('POST', '/brands', clean({ name: u.brand, companyId: company.id, category: CAT[u.btype] || 'Other', address: 'Orchard Street, Gurgaon', brandType: u.btype }));
+      brandIdByKey[k] = b.id;
+    }
+  }
+  console.log(`✓ ${Object.keys(brandIdByKey).length} brands created (all from BRAND Final Data + any extra from customer sheet)`);
 
+  // ---- Units (all 109, with owner) from customer sheet ----
   const unitByName = {};
   for (const u of units) {
     const rec = await call('POST', '/units', {
@@ -168,11 +192,13 @@ async function importReal() {
   }
   console.log(`✓ ${Object.keys(unitByName).length} units created`);
 
+  // ---- Leases: only where a unit has a brand (customer sheet). Terms from brand sheet + customer row ----
   const today = new Date().toISOString().slice(0, 10);
   let made = 0, dated = 0, withFin = 0;
   for (const u of units) {
     if (!u.brand) continue;
-    const unitId = unitByName[u.name]; const brandId = brandByName[u.brand];
+    const unitId = unitByName[u.name];
+    const brandId = brandIdByKey[normBrand(u.brand)];
     if (!unitId || !brandId) continue;
     const terms = brandTerms[normBrand(u.brand)] || {};
     const startDate = terms.docLeaseCommencementDate || today;
@@ -188,11 +214,12 @@ async function importReal() {
       ...clean(terms),
       minGuaranteePsf: terms.minGuaranteePsf != null ? terms.minGuaranteePsf : (u.basis === 'PerSqFt' ? u.mg : null)
     });
+    delete body.name; // terms.name would clash — leases have no name field
     try { await call('POST', '/leases', body); made++; }
     catch (e) { console.log(`   (lease skip ${u.name}/${u.brand}: ${e.message})`); }
   }
   console.log(`✓ ${made} leases created (${dated} with real commencement dates, ${withFin} with SD/CAM financials)`);
-  return { company: company.code, asset: asset.code, blocks: 4, brands: Object.keys(brandByName).length, units: Object.keys(unitByName).length, leases: made };
+  return { company: company.code, asset: asset.code, blocks: 4, brands: Object.keys(brandIdByKey).length, units: Object.keys(unitByName).length, leases: made };
 }
 
 async function run() {

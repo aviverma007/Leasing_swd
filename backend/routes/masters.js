@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo } = require('../lib/helpers');
+const { BRAND_FIELDS } = require('../lib/brandFields');
 
 // Table/field maps for each master entity
 const ENTITIES = {
@@ -27,8 +28,18 @@ const ENTITIES = {
   },
   brands: {
     table: 'Brands', prefix: 'BRD',
-    cols: ['Name', 'CompanyId', 'Category', 'RegularAddress', 'Address'],
-    map: r => ({ id: r.Id, code: r.Code, name: r.Name, companyId: r.CompanyId, category: r.Category, regularAddress: r.RegularAddress, address: r.Address })
+    cols: ['Name', 'CompanyId', 'Category', 'RegularAddress', 'Address', ...BRAND_FIELDS.map(f => f[1])],
+    map: r => {
+      const o = { id: r.Id, code: r.Code, name: r.Name, companyId: r.CompanyId, category: r.Category, regularAddress: r.RegularAddress, address: r.Address };
+      for (const [key, col, type] of BRAND_FIELDS) {
+        let v = r[col];
+        if (v === undefined || v === null) { o[key] = null; continue; }
+        if (type === 'date') { try { o[key] = new Date(v).toISOString().slice(0, 10); } catch { o[key] = null; } }
+        else if (type === 'dec' || type === 'int') o[key] = Number(v);
+        else o[key] = v;
+      }
+      return o;
+    }
   },
   users: {
     table: 'Users', prefix: 'USR',
@@ -38,8 +49,11 @@ const ENTITIES = {
 };
 
 // Columns that must be bound as numbers (SQL Server rejects strings for these)
-const INT_COLS = new Set(['TotalFloors', 'Floor']);
-const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea']);
+const INT_COLS = new Set(['TotalFloors', 'Floor', ...BRAND_FIELDS.filter(f => f[2] === 'int').map(f => f[1])]);
+const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea', ...BRAND_FIELDS.filter(f => f[2] === 'dec').map(f => f[1])]);
+const DATE_COLS = new Set(BRAND_FIELDS.filter(f => f[2] === 'date').map(f => f[1]));
+// DB column -> body key for the extended brand fields
+const BRAND_KEYMAP = Object.fromEntries(BRAND_FIELDS.map(f => [f[1], f[0]]));
 // NOT NULL columns with sensible defaults when the form omits them
 const DEFAULTS = { Status: 'Vacant', Active: 'Active' };
 
@@ -51,6 +65,9 @@ function bindValue(request, param, col, value) {
   } else if (DEC_COLS.has(col)) {
     const n = value === '' || value === null || value === undefined ? null : parseFloat(value);
     request.input(param, sql.Decimal(18, 2), Number.isNaN(n) ? null : n);
+  } else if (DATE_COLS.has(col)) {
+    const v = value === '' || value === null || value === undefined ? null : value;
+    request.input(param, sql.Date, v);
   } else {
     let v = value;
     if ((v === undefined || v === null || v === '') && col in DEFAULTS) v = DEFAULTS[col];
@@ -90,7 +107,8 @@ function router(entityKey) {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
-        Email: 'email', Password: 'password', Role: 'role', Active: 'active'
+        Email: 'email', Password: 'password', Role: 'role', Active: 'active',
+        ...BRAND_KEYMAP
       };
       ent.cols.forEach((col, i) => {
         const key = fieldKeyMap[col];
@@ -129,7 +147,8 @@ function router(entityKey) {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
-        Email: 'email', Password: 'password', Role: 'role', Active: 'active'
+        Email: 'email', Password: 'password', Role: 'role', Active: 'active',
+        ...BRAND_KEYMAP
       };
       const sets = cols.map((col, i) => {
         const key = fieldKeyMap[col];
