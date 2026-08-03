@@ -126,7 +126,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className={`rail${railOpen ? ' show' : ''}`}>
-        <div className="brand"><div className="logo">S</div><div><h1>ScoopSense</h1><span>Leasing &amp; Billing</span></div></div>
+        <div className="brand"><img className="logo-img" src="/smartworld-icon.png" alt="Smart World" /><div><h1>SMART LEASING</h1><span>Smart World Developers</span></div></div>
         <nav className="nav">
           {NAV.filter((n) => !n.v || canView(actingRole, n.v)).map((n, i) => n.grp && !n.v ? <div className="grp" key={i}>{n.grp}</div> : (
             <a key={n.v} className={n.v === view ? 'active' : ''} onClick={() => setView(n.v)}>

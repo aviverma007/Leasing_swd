@@ -27,10 +27,10 @@ export default function Login({ onLogin }) {
     <div className="login-wrap">
       <div className="login-card">
         <div className="login-brand">
-          <div className="logo">S</div>
+          <img className="logo-img" src="/smartworld-icon.png" alt="Smart World" />
           <div>
-            <h1>ScoopSense</h1>
-            <span>Leasing &amp; Billing</span>
+            <h1>SMART LEASING</h1>
+            <span>Smart World Developers</span>
           </div>
         </div>
         <form onSubmit={submit}>

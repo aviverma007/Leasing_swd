@@ -148,3 +148,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal);bo
 
 /* alert count badge (pending deletions) */
 .nav a .cnt.alert{background:var(--red);color:#fff;font-weight:600}
+
+/* brand logo image (replaces the old 'S' box) */
+.logo-img{width:38px;height:38px;flex:none;border-radius:9px;object-fit:contain;background:#fff;padding:3px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.login-brand .logo-img{width:46px;height:46px;border-radius:11px}
