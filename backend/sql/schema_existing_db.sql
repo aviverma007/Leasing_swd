@@ -246,6 +246,12 @@ IF COL_LENGTH('leasing.Users','PwdChangedAt') IS NULL
     ALTER TABLE leasing.Users ADD PwdChangedAt DATETIME2 NULL;
 GO
 
+
+-- Ensure Units.Owner exists on pre-existing installs
+IF COL_LENGTH('leasing.Units','Owner') IS NULL
+    ALTER TABLE leasing.Units ADD Owner NVARCHAR(200) NULL;
+GO
+
 IF OBJECT_ID('leasing.DeletionRequests','U') IS NULL
 CREATE TABLE leasing.DeletionRequests(
     Id           VARCHAR(40) PRIMARY KEY,

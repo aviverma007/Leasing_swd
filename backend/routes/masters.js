@@ -22,8 +22,8 @@ const ENTITIES = {
   },
   units: {
     table: 'Units', prefix: 'UNT',
-    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status'],
-    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status })
+    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status', 'Owner'],
+    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status, owner: r.Owner })
   },
   brands: {
     table: 'Brands', prefix: 'BRD',
@@ -88,7 +88,7 @@ function router(entityKey) {
       colNames.push('Id', 'Code');
       const fieldKeyMap = {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
-        Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status',
+        Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active'
       };
@@ -127,7 +127,7 @@ function router(entityKey) {
       request.input('id', sql.VarChar(40), req.params.id);
       const fieldKeyMap = {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
-        Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status',
+        Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active'
       };

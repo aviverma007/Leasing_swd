@@ -60,10 +60,11 @@ export const MASTER_SCHEMA = {
       { k: 'blockId', l: 'Block', req: 1, ref: 'blocks' },
       { k: 'floor', l: 'Floor', type: 'number', ph: '1' },
       { k: 'carpetArea', l: 'Carpet area (sq ft)', type: 'number', ph: '2200' },
-      { k: 'builtupArea', l: 'Built-up area (sq ft)', type: 'number', ph: '2600' }
+      { k: 'builtupArea', l: 'Built-up area (sq ft)', type: 'number', ph: '2600' },
+      { k: 'owner', l: 'Owner (customer)', ph: 'Unit owner name' }
     ],
-    head: ['Code', 'Unit', 'Asset', 'Carpet', 'Built-up', 'Status'],
-    cols: (r, db) => [r.code, r.name, nameOf(db.assets, r.assetId), (+r.carpetArea || 0).toLocaleString('en-IN'), (+r.builtupArea || 0).toLocaleString('en-IN'), r.status]
+    head: ['Code', 'Unit', 'Asset', 'Owner', 'Carpet', 'Built-up', 'Status'],
+    cols: (r, db) => [r.code, r.name, nameOf(db.assets, r.assetId), r.owner || '—', (+r.carpetArea || 0).toLocaleString('en-IN'), (+r.builtupArea || 0).toLocaleString('en-IN'), r.status]
   },
   brands: {
     sing: 'Brand',

@@ -3,3 +3,6 @@ dist/
 .env
 *.log
 .DS_Store
+
+backend/import_source.xlsx
+backend/parsed_units.json

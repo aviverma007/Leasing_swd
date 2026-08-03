@@ -583,10 +583,11 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
         </div>
         <div className="field"><label>Unit <span className="req">*</span></label>
           <select value={form.unitId} disabled={!!id} onChange={(e) => set('unitId', e.target.value)}>
-            {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}</option>)}
+            {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}{u.owner ? ' · owner: ' + u.owner : ''}</option>)}
           </select>
         </div>
       </div>
+      {(() => { const su = findById(db.units, form.unitId); return su && su.owner ? <Callout>Unit owner (customer): <b>{su.owner}</b></Callout> : null; })()}
       <div className="grp3">
         <div className="field"><label>Start date <span className="req">*</span></label><input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
         <div className="field"><label>Term (months)</label><input type="number" value={form.months} disabled={!!id} onChange={(e) => set('months', +e.target.value)} /></div>
