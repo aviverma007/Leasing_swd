@@ -2,7 +2,7 @@ const { sql, SCHEMA } = require('../db');
 const { uid, nextNo, monthRange, round2, irnHex } = require('./helpers');
 
 function mgAmount(lease, unit) {
-  return lease.MgBasis === 'PerSqFt' ? (Number(lease.Mg) || 0) * (Number(unit.CarpetArea) || 0) : (Number(lease.Mg) || 0);
+  return lease.MgBasis === 'PerSqFt' ? (Number(lease.Mg) || 0) * (Number(unit.BuiltupArea) || 0) : (Number(lease.Mg) || 0);
 }
 
 async function getLease(pool, leaseId) {

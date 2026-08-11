@@ -5,7 +5,7 @@ const { LEASE_FIELDS, sqlType, coerce, mapExtra } = require('../lib/leaseFields'
 const router = express.Router();
 
 function mgAmount(l, unit) {
-  return l.mgBasis === 'PerSqFt' ? (Number(l.mg) || 0) * (Number(unit.CarpetArea) || 0) : (Number(l.mg) || 0);
+  return l.mgBasis === 'PerSqFt' ? (Number(l.mg) || 0) * (Number(unit.BuiltupArea) || 0) : (Number(l.mg) || 0);
 }
 
 router.get('/', async (req, res) => {

@@ -109,7 +109,7 @@ export const RENTAL_TYPES = [
   ['VarRS', 'Variable rev-share (slabs)']
 ];
 export const RENTAL_HINT = {
-  MG: "Bills MG each period. MG = lumpsum, or ₹/sq ft × carpet area.",
+  MG: "Bills MG each period. MG = lumpsum, or ₹/sq ft × built-up area.",
   MGvsRS: "Bills MG; when revenue share for the month exceeds MG, the excess is billed as a top-up.",
   PureRS: "No MG. Bills revenue share % of the month's entered sales.",
   VarRS: "Slab-based revenue share — enter sales; % applies (slab UI represented, single % used for calc)."
