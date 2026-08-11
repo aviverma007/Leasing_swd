@@ -699,7 +699,6 @@ const ALL_LEASE_KEYS = [...new Set([...LEASE_SECTIONS.flatMap(([, fs]) => fs.map
 function LeaseFormModal({ id, db, onClose, refresh, notify }) {
   const existing = id ? findById(db.leases, id) : null;
   const vacantUnits = db.units.filter((u) => u.status !== 'Leased' || (existing && u.id === existing.unitId));
-  const [tab, setTab] = useState('core');
   const [form, setForm] = useState(() => {
     const base = existing ? {
       brandId: existing.brandId, unitId: existing.unitId, startDate: existing.startDate, months: 36,
@@ -739,16 +738,16 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
     return <div className="field" key={k}><label>{label}</label><input type={inputType} value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
   };
 
-  const TABS = [['core', 'Rental'], ['nfa', 'Note for Approval'], ...LEASE_SECTIONS.map((s, i) => ['s' + i, s[0]])];
+  const unit = findById(db.units, form.unitId);
+  const brand = findById(db.brands, form.brandId);
 
   return (
     <Modal title={id ? 'Edit lease' : 'New lease'} onClose={onClose} onSave={save} wide>
-      <div className="lease-tabs">
-        {TABS.map(([v, l]) => <button key={v} type="button" className={`ltab ${tab === v ? 'on' : ''}`} onClick={() => setTab(v)}>{l}</button>)}
-      </div>
+      <div className="lease-form">
 
-      {tab === 'core' && (
-        <div className="lease-pane">
+        {/* ===== Rental ===== */}
+        <div className="form-section">
+          <div className="sectlabel big">Rental</div>
           <div className="grp2">
             <div className="field"><label>Brand <span className="req">*</span></label>
               <select value={form.brandId} onChange={(e) => set('brandId', e.target.value)}>
@@ -761,13 +760,12 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
               </select>
             </div>
           </div>
-          {(() => { const su = findById(db.units, form.unitId); return su && su.owner ? <Callout>Unit owner (customer): <b>{su.owner}</b></Callout> : null; })()}
+          {unit && unit.owner ? <Callout>Unit owner (customer): <b>{unit.owner}</b></Callout> : null}
           <div className="grp3">
             <div className="field"><label>Start date <span className="req">*</span></label><input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
             <div className="field"><label>Term (months)</label><input type="number" value={form.months} disabled={!!id} onChange={(e) => set('months', +e.target.value)} /></div>
             <div className="field"><label>GST %</label><input type="number" value={form.gst} onChange={(e) => set('gst', +e.target.value)} /></div>
           </div>
-          <div className="sectlabel">Rental structure</div>
           <div className="field"><label>Type</label>
             <select value={form.rentalType} onChange={(e) => set('rentalType', e.target.value)}>
               {RENTAL_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -792,46 +790,35 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
           </div>
           <Callout>{RENTAL_HINT[form.rentalType]}</Callout>
         </div>
-      )}
 
-      {tab === 'nfa' && (() => {
-        const unit = findById(db.units, form.unitId);
-        const brand = findById(db.brands, form.brandId);
-        const autofill = {
-          project: nameOf(db.assets, unit?.assetId) || 'Orchard Street',
-          brandName: brand?.name || '—',
-          cpName: form.channelPartner || '—',
-          unitNo: unit?.name || '—',
-          superArea: unit?.builtupArea != null ? (+unit.builtupArea).toLocaleString('en-IN') : '—'
-        };
-        return (
-          <div className="lease-pane">
-            <div className="sectlabel">Note for Approval</div>
-            <div className="nfa-auto">
-              <div><span>Project</span><b>{autofill.project}</b></div>
-              <div><span>Brand</span><b>{autofill.brandName}</b></div>
-              <div><span>CP name</span><b>{autofill.cpName}</b></div>
-              <div><span>Unit no</span><b>{autofill.unitNo}</b></div>
-              <div><span>Super area (sq ft)</span><b>{autofill.superArea}</b></div>
-              <div><span>Owner / customer</span><b>{unit?.owner || form.nfaClientName || '—'}</b></div>
-            </div>
+        {/* ===== Note for Approval ===== */}
+        <div className="form-section">
+          <div className="sectlabel big">Note for Approval</div>
+          <div className="nfa-auto">
+            <div><span>Project</span><b>{nameOf(db.assets, unit?.assetId) || 'Orchard Street'}</b></div>
+            <div><span>Brand</span><b>{brand?.name || '—'}</b></div>
+            <div><span>CP name</span><b>{form.channelPartner || '—'}</b></div>
+            <div><span>Unit no</span><b>{unit?.name || '—'}</b></div>
+            <div><span>Super area (sq ft)</span><b>{unit?.builtupArea != null ? (+unit.builtupArea).toLocaleString('en-IN') : '—'}</b></div>
+            <div><span>Owner / customer</span><b>{unit?.owner || form.nfaClientName || '—'}</b></div>
+          </div>
+          <div className="lease-grid">
             {NFA_ROWS.map((row, idx) => {
-              if (row[0] === 'section') return <div className="sectlabel" key={'sec' + idx} style={{ marginTop: 14 }}>{row[1]}</div>;
-              const [k, label, type] = row;
-              if (type === 'area') return <div className="field" key={k}><label>{label}</label><textarea value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
-              const inputType = type === 'date' ? 'date' : type === 'num' ? 'number' : 'text';
-              return <div className="field" key={k}><label>{label}</label><input type={inputType} value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
+              if (row[0] === 'section') return <div className="sectlabel sub-sect" key={'sec' + idx}>{row[1]}</div>;
+              return renderField(row);
             })}
           </div>
-        );
-      })()}
-
-      {LEASE_SECTIONS.map((sec, i) => tab === ('s' + i) && (
-        <div className="lease-pane" key={i}>
-          <div className="sectlabel">{sec[0]}</div>
-          <div className="lease-grid">{sec[1].map(renderField)}</div>
         </div>
-      ))}
+
+        {/* ===== All remaining detail sections ===== */}
+        {LEASE_SECTIONS.map((sec, i) => (
+          <div className="form-section" key={i}>
+            <div className="sectlabel big">{sec[0]}</div>
+            <div className="lease-grid">{sec[1].map(renderField)}</div>
+          </div>
+        ))}
+
+      </div>
     </Modal>
   );
 }

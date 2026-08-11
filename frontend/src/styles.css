@@ -168,3 +168,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal);bo
 .nfa-auto span{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
 .nfa-auto b{font-size:13px;color:var(--ink)}
 @media(max-width:640px){.nfa-auto{grid-template-columns:1fr 1fr}}
+
+/* single continuous lease form */
+.lease-form{display:flex;flex-direction:column;gap:4px}
+.form-section{padding:6px 0 16px;border-bottom:1px solid var(--line)}
+.form-section:last-child{border-bottom:none}
+.sectlabel.big{font-size:14px;font-weight:700;color:var(--teal);margin:10px 0 12px;letter-spacing:.2px}
+.sectlabel.sub-sect{grid-column:1 / -1;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:8px;border-top:1px dashed var(--line);padding-top:10px}
