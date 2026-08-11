@@ -640,7 +640,61 @@ const LEASE_SECTIONS = [
     ['billingRemarks', 'Remarks from billing', 'area']
   ]]
 ];
-const ALL_LEASE_KEYS = LEASE_SECTIONS.flatMap(([, fs]) => fs.map(f => f[0]));
+
+// Note for Approval (NFA) — a single consolidated tab mirroring the approval note.
+// Fields marked {ro:true} are read-only mirrors of values entered on other tabs.
+const NFA_ROWS = [
+  ['section', 'Deal identification'],
+  ['nfaClientName', 'Client name', 'text'],
+  ['nfaOpportunityId', 'Opportunity ID', 'text'],
+  ['nfaLessor', 'Lessor (legal entity / landlord)', 'text'],
+  ['nfaLandlordDetails', 'Landlord details', 'area'],
+  ['section', 'Unit & agreement status'],
+  ['nfaUnitStatus', 'Unit status (CD Executed / Not Executed / Unsold)', 'text'],
+  ['nfaLeaseAgreementStatus', 'Lease agreement status (With M3M / With Landlord)', 'text'],
+  ['nfaSpaStatus', 'SPA status (mandatory for CD customers)', 'text'],
+  ['nfaLeaseGuaranteeStatus', 'Lease guarantee status', 'text'],
+  ['section', 'Commercials'],
+  ['minGuaranteePsf', 'Lease rent / MG (₹/sq ft)', 'num'],
+  ['camSchedule', 'CAM charges / schedule', 'text'],
+  ['revenueSharePct', 'Revenue share %', 'num'],
+  ['nfaRentEscalation', 'Rent escalation', 'text'],
+  ['nfaCostToCompany', 'Cost to company (₹)', 'num'],
+  ['section', 'Fitout'],
+  ['nfaTotalFitoutCost', 'Total fitout cost (₹)', 'num'],
+  ['nfaFitoutSupport', 'Fitout support', 'text'],
+  ['nfaFitoutChargesBorneBy', 'Fitout CAM & elec charges borne by', 'text'],
+  ['nfaFitoutCamFreePeriod', 'Fitout CAM free period', 'text'],
+  ['nfaFitoutRentFreePeriod', 'Fitout rent free period', 'text'],
+  ['section', 'Lease terms'],
+  ['tenureYears', 'Lease tenure (yrs)', 'num'],
+  ['lockinMonths', 'Lock-in period (months)', 'num'],
+  ['nfaRentSdSchedule', 'Rent security deposit & payment schedule', 'area'],
+  ['nfaCamSdSchedule', 'CAM security deposit & payment schedule', 'area'],
+  ['nfaStampDuty', 'Stamp duty', 'text'],
+  ['nfaDeveloperScope', 'Developer scope of work', 'area'],
+  ['nfaAdditionalTerms', 'Additional terms', 'area'],
+  ['nfaSignage', 'Signage', 'text'],
+  ['section', 'Brokerage & occupancy'],
+  ['brokerageTerms', 'Brokerage', 'text'],
+  ['brokerageDisbursal', 'Brokerage disbursal policy', 'text'],
+  ['nfaOccupancyClause', 'Occupancy clause', 'area'],
+  ['section', 'Dates'],
+  ['docLeaseCommencementDate', 'Handover / lease commencement date', 'date'],
+  ['nfaOperationalTerms', 'Operational / rent commencement date', 'area'],
+  ['section', 'Cheques'],
+  ['nfaFitoutSupportCheque', 'Interest-free fitout support (undated cheque)', 'text'],
+  ['nfaLockinRentalCheque', 'Lock-in period rental cheque', 'text'],
+  ['nfaChequeReceivedDetails', 'Cheque received details', 'area'],
+  ['section', 'Approval'],
+  ['nfaPreparedBy', 'Prepared by', 'text'],
+  ['nfaPreparedDate', 'Prepared date', 'date'],
+  ['nfaProposedBy', 'Proposed by', 'text'],
+  ['nfaHod', 'HOD', 'text'],
+  ['nfaApprovedBy1', 'Approved by', 'text'],
+  ['nfaApprovedBy2', 'Approved by (2)', 'text']
+];
+const ALL_LEASE_KEYS = [...new Set([...LEASE_SECTIONS.flatMap(([, fs]) => fs.map(f => f[0])), ...NFA_ROWS.filter(r => r[0] !== 'section').map(r => r[0])])];
 
 function LeaseFormModal({ id, db, onClose, refresh, notify }) {
   const existing = id ? findById(db.leases, id) : null;
@@ -685,7 +739,7 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
     return <div className="field" key={k}><label>{label}</label><input type={inputType} value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
   };
 
-  const TABS = [['core', 'Rental'], ...LEASE_SECTIONS.map((s, i) => ['s' + i, s[0]])];
+  const TABS = [['core', 'Rental'], ['nfa', 'Note for Approval'], ...LEASE_SECTIONS.map((s, i) => ['s' + i, s[0]])];
 
   return (
     <Modal title={id ? 'Edit lease' : 'New lease'} onClose={onClose} onSave={save} wide>
@@ -739,6 +793,38 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
           <Callout>{RENTAL_HINT[form.rentalType]}</Callout>
         </div>
       )}
+
+      {tab === 'nfa' && (() => {
+        const unit = findById(db.units, form.unitId);
+        const brand = findById(db.brands, form.brandId);
+        const autofill = {
+          project: nameOf(db.assets, unit?.assetId) || 'Orchard Street',
+          brandName: brand?.name || '—',
+          cpName: form.channelPartner || '—',
+          unitNo: unit?.name || '—',
+          superArea: unit?.builtupArea != null ? (+unit.builtupArea).toLocaleString('en-IN') : '—'
+        };
+        return (
+          <div className="lease-pane">
+            <div className="sectlabel">Note for Approval</div>
+            <div className="nfa-auto">
+              <div><span>Project</span><b>{autofill.project}</b></div>
+              <div><span>Brand</span><b>{autofill.brandName}</b></div>
+              <div><span>CP name</span><b>{autofill.cpName}</b></div>
+              <div><span>Unit no</span><b>{autofill.unitNo}</b></div>
+              <div><span>Super area (sq ft)</span><b>{autofill.superArea}</b></div>
+              <div><span>Owner / customer</span><b>{unit?.owner || form.nfaClientName || '—'}</b></div>
+            </div>
+            {NFA_ROWS.map((row, idx) => {
+              if (row[0] === 'section') return <div className="sectlabel" key={'sec' + idx} style={{ marginTop: 14 }}>{row[1]}</div>;
+              const [k, label, type] = row;
+              if (type === 'area') return <div className="field" key={k}><label>{label}</label><textarea value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
+              const inputType = type === 'date' ? 'date' : type === 'num' ? 'number' : 'text';
+              return <div className="field" key={k}><label>{label}</label><input type={inputType} value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
+            })}
+          </div>
+        );
+      })()}
 
       {LEASE_SECTIONS.map((sec, i) => tab === ('s' + i) && (
         <div className="lease-pane" key={i}>

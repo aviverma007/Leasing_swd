@@ -161,3 +161,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal);bo
 .lease-pane{min-height:220px}
 .lease-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
 @media(max-width:640px){.lease-grid{grid-template-columns:1fr}}
+
+/* NFA auto-filled summary strip */
+.nfa-auto{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:12px 14px;margin-bottom:12px}
+.nfa-auto div{display:flex;flex-direction:column;gap:2px}
+.nfa-auto span{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.nfa-auto b{font-size:13px;color:var(--ink)}
+@media(max-width:640px){.nfa-auto{grid-template-columns:1fr 1fr}}
