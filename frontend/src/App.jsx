@@ -551,36 +551,58 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
 
 // Rich lease field sections — drives the tabbed lease form.
 // Each field: [key, label, type]  where type: 'date'|'num'|'text'|'area'|select-array
+// Standard option sets for dropdowns (blank first = optional). Derived from the Excel.
+const OPT = {
+  yesNo: ['', 'Yes', 'No'],
+  availableFor: ['', 'Leasing', 'Self Use', 'Self Use(Approved)', 'to be connected'],
+  brandStatus: ['', 'Operational', 'Yet To Be Operational', 'Under Pipe line', 'Cancelled'],
+  handoverTeam: ['', 'Eligible', 'Not Eligible', 'Handover'],
+  handoverStatus: ['', 'Pending', 'Handover', 'Handover Done'],
+  possession: ['', 'Eligible', 'Not Eligible', 'Handover'],
+  cdStatus: ['', 'Executed', 'Not Executed', 'Unsold'],
+  regStatus: ['', 'Registered', 'Pending', 'Not Applicable'],
+  agrStatus: ['', 'Signed', 'Pending', 'Under Process', 'Not Applicable'],
+  signedFrom: ['', 'Signed', 'Pending', 'Direct', 'Not Applicable'],
+  stage: ['', 'Fitout', 'Not Fitting Out', 'Operational', 'Deal Cancelled', 'Direct'],
+  opStatus: ['', 'Operational', 'Yet to be Operational', 'Cancelled', 'Direct'],
+  brandType: ['', 'F&B', 'Salon', 'Health', 'Bank', 'Pharmacy', 'Laundry', 'Departmental store', 'Other'],
+  unitStatus: ['', 'CD Executed', 'CD Not Executed', 'Unsold'],
+  leaseAgrStatus: ['', 'With M3M', 'With Landlord'],
+  spaStatus: ['', 'Done', 'Pending', 'Not Applicable'],
+  guaranteeStatus: ['', 'Provided', 'Pending', 'Not Applicable'],
+  chargesBorneBy: ['', 'Tenant', 'Landlord', 'Developer', 'Shared']
+};
+
 const LEASE_SECTIONS = [
   ['Booking & Brand', [
     ['bookingDate', 'Date of booking', 'date'],
     ['loiDate', 'LOI date', 'date'],
     ['leasingHod', 'Leasing HOD', 'text'],
-    ['brandStatus', 'Brand status', ['', 'Operational', 'Yet To Be Operational', 'Under Pipe line', 'Cancelled']],
-    ['availableFor', 'Available for', ['', 'Leasing', 'Self Use', 'Self Use(Approved)', 'to be connected']],
+    ['brandStatus', 'Brand status', OPT.brandStatus],
+    ['availableFor', 'Available for', OPT.availableFor],
     ['rmName', 'RM name', 'text'],
     ['channelPartner', 'Channel partner', 'text'],
     ['category', 'Category', 'text']
   ]],
   ['Consent, Possession & TCV', [
-    ['consentStatus', 'Consent status', 'text'],
-    ['lms', 'LMS', 'text'],
-    ['physicalPossessionStatus', 'Physical possession status', 'text'],
-    ['handoverStatus', 'Handover status (possession team)', ['', 'Eligible', 'Not Eligible', 'Handover']],
+    ['consentStatus', 'Consent status', OPT.yesNo],
+    ['lms', 'LMS', OPT.yesNo],
+    ['physicalPossessionStatus', 'Physical possession status', OPT.possession],
+    ['handoverStatus', 'Handover status (possession team)', OPT.handoverTeam],
     ['tcv', 'TCV (₹)', 'num'],
     ['calledIncludingTax', 'Called including tax (₹)', 'num']
   ]],
   ['Agreement & Registration', [
-    ['cdStatus', 'CD status', 'text'],
+    ['cdStatus', 'CD status', OPT.cdStatus],
     ['cdExecutionDate', 'CD execution date', 'date'],
-    ['registrationStatus', 'Registration status', 'text'],
+    ['registrationStatus', 'Registration status', OPT.regStatus],
     ['agreementRegistrationDate', 'Agreement registration date', 'date'],
-    ['agreementStatus', 'Agreement status', 'text'],
+    ['agreementStatus', 'Agreement status', OPT.agrStatus],
     ['dealStatus', 'Status', 'text'],
     ['signedAgreementDate', 'Date of signed agreement', 'date'],
     ['agreementConsultant', 'Agreement consultant', 'text'],
-    ['agreementSignedBrand', 'Agreement signed from brand', 'text'],
-    ['agreementSignedInvestor', 'Agreement signed from investor', 'text'],
+    ['agreementSignedBrand', 'Agreement signed from brand', OPT.signedFrom],
+    ['agreementSignedInvestor', 'Agreement signed from investor', OPT.signedFrom],
     ['dealWith', 'Deal with', 'text']
   ]],
   ['Key Dates', [
@@ -594,8 +616,8 @@ const LEASE_SECTIONS = [
     ['actualRcdDate', 'Actual RCD date', 'date']
   ]],
   ['Fitout & Capex', [
-    ['stage', 'Stage', ['', 'Fitout', 'Not Fitting Out', 'Operational', 'Cancelled']],
-    ['operationalStatus', 'Operational / Not operational', 'text'],
+    ['stage', 'Stage', OPT.stage],
+    ['operationalStatus', 'Operational / Not operational', OPT.opStatus],
     ['percentWork', '% of work', 'num'],
     ['fitoutPeriod', 'Fitout period', 'text'],
     ['loanRs', 'Loan (₹)', 'num'],
@@ -650,10 +672,10 @@ const NFA_ROWS = [
   ['nfaLessor', 'Lessor (legal entity / landlord)', 'text'],
   ['nfaLandlordDetails', 'Landlord details', 'area'],
   ['section', 'Unit & agreement status'],
-  ['nfaUnitStatus', 'Unit status (CD Executed / Not Executed / Unsold)', 'text'],
-  ['nfaLeaseAgreementStatus', 'Lease agreement status (With M3M / With Landlord)', 'text'],
-  ['nfaSpaStatus', 'SPA status (mandatory for CD customers)', 'text'],
-  ['nfaLeaseGuaranteeStatus', 'Lease guarantee status', 'text'],
+  ['nfaUnitStatus', 'Unit status (CD Executed / Not Executed / Unsold)', OPT.unitStatus],
+  ['nfaLeaseAgreementStatus', 'Lease agreement status (With M3M / With Landlord)', OPT.leaseAgrStatus],
+  ['nfaSpaStatus', 'SPA status (mandatory for CD customers)', OPT.spaStatus],
+  ['nfaLeaseGuaranteeStatus', 'Lease guarantee status', OPT.guaranteeStatus],
   ['section', 'Commercials'],
   ['minGuaranteePsf', 'Lease rent / MG (₹/sq ft)', 'num'],
   ['camSchedule', 'CAM charges / schedule', 'text'],
@@ -663,7 +685,7 @@ const NFA_ROWS = [
   ['section', 'Fitout'],
   ['nfaTotalFitoutCost', 'Total fitout cost (₹)', 'num'],
   ['nfaFitoutSupport', 'Fitout support', 'text'],
-  ['nfaFitoutChargesBorneBy', 'Fitout CAM & elec charges borne by', 'text'],
+  ['nfaFitoutChargesBorneBy', 'Fitout CAM & elec charges borne by', OPT.chargesBorneBy],
   ['nfaFitoutCamFreePeriod', 'Fitout CAM free period', 'text'],
   ['nfaFitoutRentFreePeriod', 'Fitout rent free period', 'text'],
   ['section', 'Lease terms'],
@@ -728,9 +750,11 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
 
   const renderField = ([k, label, type]) => {
     if (Array.isArray(type)) {
+      const cur = form[k] ?? '';
+      const opts = type.includes(cur) ? type : [...type, cur]; // keep an existing value not in the list
       return <div className="field" key={k}><label>{label}</label>
-        <select value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)}>
-          {type.map((o) => <option key={o} value={o}>{o || '—'}</option>)}
+        <select value={cur} onChange={(e) => set(k, e.target.value)}>
+          {opts.map((o) => <option key={o} value={o}>{o === '' ? '— select —' : o}</option>)}
         </select></div>;
     }
     if (type === 'area') return <div className="field" key={k} style={{ gridColumn: '1 / -1' }}><label>{label}</label><textarea value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} /></div>;
