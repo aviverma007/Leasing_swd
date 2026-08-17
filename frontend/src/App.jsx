@@ -247,6 +247,7 @@ function ViewRouter(props) {
   if (view === 'sales') return <SalesPage {...props} />;
   if (view === 'invoices') return <InvoicesPage {...props} />;
   if (view === 'collections') return <CollectionsPage {...props} />;
+  if (view === 'collectionmaster') return <CollectionMasterPage {...props} />;
   if (view === 'investors') return <InvestorsPage {...props} />;
   if (view === 'disbursement') return <DisbursementPage {...props} />;
   if (view === 'deletions') return <DeletionsPage {...props} />;
@@ -1230,6 +1231,69 @@ function ViewInvoiceModal({ id, db, onClose }) {
 }
 
 /* ===================== COLLECTIONS ===================== */
+function CollectionMasterPage({ db, search, setSearch }) {
+  // Aggregate invoiced / collected / outstanding per lease (brand + unit)
+  const collByInv = {};
+  (db.collections || []).forEach((c) => { collByInv[c.invoiceId] = (collByInv[c.invoiceId] || 0) + (+c.amount || 0); });
+
+  const rowsByLease = {};
+  (db.invoices || []).forEach((inv) => {
+    const key = inv.leaseId || inv.id;
+    if (!rowsByLease[key]) {
+      const lease = findById(db.leases, inv.leaseId);
+      rowsByLease[key] = {
+        leaseId: inv.leaseId,
+        brandId: inv.brandId || lease?.brandId,
+        unitId: inv.unitId || lease?.unitId,
+        invoiced: 0, collected: 0, count: 0
+      };
+    }
+    rowsByLease[key].invoiced += (+inv.total || 0);
+    rowsByLease[key].collected += (collByInv[inv.id] || 0);
+    rowsByLease[key].count++;
+  });
+
+  let rows = Object.values(rowsByLease).map((r) => ({ ...r, outstanding: Math.max(0, r.invoiced - r.collected) }));
+  const q = (search || '').toLowerCase();
+  if (q) rows = rows.filter((r) => [nameOf(db.brands, r.brandId), nameOf(db.units, r.unitId)].join(' ').toLowerCase().includes(q));
+  rows.sort((a, b) => b.outstanding - a.outstanding);
+
+  const tot = rows.reduce((t, r) => ({ inv: t.inv + r.invoiced, col: t.col + r.collected, out: t.out + r.outstanding }), { inv: 0, col: 0, out: 0 });
+
+  return (
+    <>
+      <div className="kpirow" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(3,1fr)' }}>
+        <div className="kpi"><div className="kpi-l">Total invoiced</div><div className="kpi-v">{money0(tot.inv)}</div></div>
+        <div className="kpi"><div className="kpi-l">Total collected</div><div className="kpi-v" style={{ color: 'var(--green)' }}>{money0(tot.col)}</div></div>
+        <div className="kpi"><div className="kpi-l">Outstanding</div><div className="kpi-v" style={{ color: 'var(--amber)' }}>{money0(tot.out)}</div></div>
+      </div>
+      <div className="toolbar"><SearchBox placeholder="Search brand or unit…" value={search} onChange={setSearch} /></div>
+      <div className="tablewrap">
+        {rows.length === 0 ? <EmptyMini text="No invoices yet. Generate invoices to see collection status." /> : (
+          <table>
+            <thead><tr><th>Brand / Unit</th><th className="num">Invoices</th><th className="num">Invoiced</th><th className="num">Collected</th><th className="num">Outstanding</th><th>Status</th></tr></thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const pct = r.invoiced > 0 ? Math.round((r.collected / r.invoiced) * 100) : 0;
+                return (
+                  <tr key={i}>
+                    <td>{nameOf(db.brands, r.brandId)}<div className="sub">{nameOf(db.units, r.unitId)}</div></td>
+                    <td className="num sub">{r.count}</td>
+                    <td className="num">{money0(r.invoiced)}</td>
+                    <td className="num" style={{ color: 'var(--green)' }}>{money0(r.collected)}</td>
+                    <td className="num strong" style={{ color: r.outstanding > 0 ? 'var(--amber)' : 'inherit' }}>{money0(r.outstanding)}</td>
+                    <td>{r.outstanding <= 0 ? <Pill color="green">Cleared</Pill> : pct > 0 ? <Pill color="amber">{pct}% paid</Pill> : <Pill color="red">Unpaid</Pill>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
 function CollectionsPage({ db, search, setSearch, setModal, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.collections) || []);
   const rows = db.collections.filter((c) => {
