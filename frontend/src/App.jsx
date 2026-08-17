@@ -504,6 +504,7 @@ function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin
 /* ===================== DASHBOARD ===================== */
 function InventoryPage({ db, search, setSearch }) {
   const [proj, setProj] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all'); // all | leased | vacant | selfuse
   const [openUnit, setOpenUnit] = useState(null);
   // lease lookup: unitId -> active lease (for brand + status)
   const leaseByUnit = {};
@@ -512,10 +513,19 @@ function InventoryPage({ db, search, setSearch }) {
   const assets = db.assets || [];
   const shownAssets = proj === 'all' ? assets : assets.filter((a) => a.id === proj);
 
-  const q = (search || '').toLowerCase();
-  const unitMatches = (u) => !q || [u.name, u.owner, nameOf(db.brands, leaseByUnit[u.id]?.brandId)].join(' ').toLowerCase().includes(q);
+  const statusOf = (u) => {
+    if (leaseByUnit[u.id]) return 'leased';
+    if ((u.availableFor || '').toLowerCase().includes('self')) return 'selfuse';
+    return 'vacant';
+  };
 
-  // roll-up counts for an array of units
+  const q = (search || '').toLowerCase();
+  const unitMatches = (u) => {
+    if (statusFilter !== 'all' && statusOf(u) !== statusFilter) return false;
+    return !q || [u.name, u.owner, nameOf(db.brands, leaseByUnit[u.id]?.brandId)].join(' ').toLowerCase().includes(q);
+  };
+
+  // roll-up counts for an array of units (always over ALL statuses, for the KPI cards)
   const tally = (units) => {
     const t = { total: units.length, leased: 0, vacant: 0, selfuse: 0, area: 0 };
     units.forEach((u) => {
@@ -530,7 +540,14 @@ function InventoryPage({ db, search, setSearch }) {
   };
 
   const allUnits = (db.units || []).filter(unitMatches);
-  const grand = tally(allUnits);
+  const grand = tally((proj === 'all' ? (db.units || []) : (db.units || []).filter((u) => u.assetId === proj)).filter((u) => !q || [u.name, u.owner, nameOf(db.brands, leaseByUnit[u.id]?.brandId)].join(' ').toLowerCase().includes(q)));
+
+  const STATUS_TABS = [
+    ['all', 'All', grand.total],
+    ['leased', 'Leased / Booked', grand.leased],
+    ['vacant', 'Vacant', grand.vacant],
+    ['selfuse', 'Self-use', grand.selfuse]
+  ];
 
   return (
     <>
@@ -542,6 +559,13 @@ function InventoryPage({ db, search, setSearch }) {
           </select>
         </div>
         <SearchBox placeholder="Search unit, owner or brand…" value={search} onChange={setSearch} />
+      </div>
+      <div className="inv-status-tabs">
+        {STATUS_TABS.map(([v, l, n]) => (
+          <button key={v} type="button" className={`inv-stab ${v} ${statusFilter === v ? 'on' : ''}`} onClick={() => setStatusFilter(v)}>
+            {l} <span className="cnt">{n}</span>
+          </button>
+        ))}
       </div>
 
       <div className="kpirow" style={{ marginBottom: 16 }}>

@@ -227,3 +227,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal);bo
 .kv{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
 .kv span{color:var(--muted)}
 .kv b{color:var(--ink);font-weight:600;text-align:right}
+
+/* inventory status filter tabs */
+.inv-status-tabs{display:flex;gap:8px;margin:12px 0 16px;flex-wrap:wrap}
+.inv-stab{font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:7px}
+.inv-stab .cnt{font-size:11px;background:var(--surface2);padding:1px 7px;border-radius:20px;color:var(--muted);font-family:var(--mono)}
+.inv-stab:hover{background:var(--surface2)}
+.inv-stab.on{border-color:transparent;color:#fff}
+.inv-stab.on .cnt{background:rgba(255,255,255,.25);color:#fff}
+.inv-stab.all.on{background:var(--ink,#1f2937)}
+.inv-stab.leased.on{background:#1a7a48}
+.inv-stab.vacant.on{background:#c98a1a}
+.inv-stab.selfuse.on{background:#6b7280}
