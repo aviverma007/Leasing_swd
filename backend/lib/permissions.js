@@ -5,7 +5,7 @@
    Used by the frontend to gate UI, and available to the backend for enforcement. */
 
 const MODULES = [
-  'dashboard', 'inventory', 'collectionmaster', 'deletions', 'companies', 'assets', 'blocks', 'units', 'brands', 'users',
+  'dashboard', 'inventory', 'collectionmaster', 'investoraccounts', 'deletions', 'companies', 'assets', 'blocks', 'units', 'brands', 'users',
   'leases', 'sales', 'invoices', 'collections', 'investors', 'disbursement', 'reports'
 ];
 
@@ -18,27 +18,27 @@ function row(map) {
 
 const ACCESS = {
   Admin: row({
-    dashboard: 'view', inventory: 'view', collectionmaster: 'view', deletions: 'edit', companies: 'edit', assets: 'edit', blocks: 'edit', units: 'edit', brands: 'edit', users: 'edit',
+    dashboard: 'view', inventory: 'view', collectionmaster: 'view', investoraccounts: 'view', deletions: 'edit', companies: 'edit', assets: 'edit', blocks: 'edit', units: 'edit', brands: 'edit', users: 'edit',
     leases: 'edit', sales: 'edit', invoices: 'edit', collections: 'edit', investors: 'edit', disbursement: 'edit', reports: 'view'
   }),
   'Center/Portfolio Head': row({
-    dashboard: 'view', inventory: 'view', collectionmaster: 'view', companies: 'view', assets: 'view', blocks: 'view', units: 'view', brands: 'view',
+    dashboard: 'view', inventory: 'view', collectionmaster: 'view', investoraccounts: 'view', companies: 'view', assets: 'view', blocks: 'view', units: 'view', brands: 'view',
     leases: 'view', sales: 'view', invoices: 'view', collections: 'view', investors: 'edit', disbursement: 'edit', reports: 'view'
   }),
   'Finance Head': row({
-    dashboard: 'view', inventory: 'view', collectionmaster: 'view', companies: 'view', assets: 'view', blocks: 'view', units: 'view', brands: 'view',
+    dashboard: 'view', inventory: 'view', collectionmaster: 'view', investoraccounts: 'view', companies: 'view', assets: 'view', blocks: 'view', units: 'view', brands: 'view',
     leases: 'view', sales: 'view', invoices: 'edit', collections: 'edit', investors: 'edit', disbursement: 'edit', reports: 'view'
   }),
   'Leasing Head': row({
-    dashboard: 'view', inventory: 'view', collectionmaster: 'view', companies: 'edit', assets: 'edit', blocks: 'edit', units: 'edit', brands: 'edit',
+    dashboard: 'view', inventory: 'view', collectionmaster: 'view', investoraccounts: 'view', companies: 'edit', assets: 'edit', blocks: 'edit', units: 'edit', brands: 'edit',
     leases: 'edit', sales: 'edit', invoices: 'edit', collections: 'view', investors: 'edit', disbursement: 'none', reports: 'view'
   }),
   Manager: row({
-    dashboard: 'view', inventory: 'view', collectionmaster: 'view', companies: 'view', assets: 'view', blocks: 'view', units: 'view', brands: 'view',
+    dashboard: 'view', inventory: 'view', collectionmaster: 'view', investoraccounts: 'view', companies: 'view', assets: 'view', blocks: 'view', units: 'view', brands: 'view',
     leases: 'view', sales: 'edit', invoices: 'view', collections: 'edit', investors: 'edit', disbursement: 'edit', reports: 'view'
   }),
   'Owner Representative': row({
-    dashboard: 'view', inventory: 'view', collectionmaster: 'view',
+    dashboard: 'view', inventory: 'view', collectionmaster: 'view', investoraccounts: 'view',
     leases: 'view', invoices: 'view', investors: 'view', disbursement: 'view', reports: 'view'
   })
 };

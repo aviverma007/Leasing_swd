@@ -133,6 +133,7 @@ export const NAV = [
   { v: 'collectionmaster', label: 'Collection Master' },
   { grp: 'Rent Disbursement' },
   { v: 'investors', label: 'Investor Units' },
+  { v: 'investoraccounts', label: 'Investor Accounts' },
   { v: 'disbursement', label: 'Process Disbursement' },
   { grp: 'Reports' },
   { v: 'reports', label: 'Reports & SAP' },
@@ -155,6 +156,7 @@ export const PAGES = {
   collections: { t: 'Collections', s: 'Invoice-wise receipts with TDS and instrument' },
   collectionmaster: { t: 'Collection Master', s: 'Invoiced, collected and outstanding — reconciled per brand & unit' },
   investors: { t: 'Investor Units', s: "Investor ownership, disbursement % & bank details (maker-checker)" },
+  investoraccounts: { t: 'Investor Accounts', s: 'Rent collected, distributed and pending per investor' },
   disbursement: { t: 'Process Rent Disbursement', s: 'Monthly disbursement with deductions, TDS, hold & payment' },
   reports: { t: 'Reports & SAP Entry Book', s: 'Disbursement, hold, SD and GL export' },
   deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' }

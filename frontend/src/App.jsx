@@ -249,6 +249,7 @@ function ViewRouter(props) {
   if (view === 'collections') return <CollectionsPage {...props} />;
   if (view === 'collectionmaster') return <CollectionMasterPage {...props} />;
   if (view === 'investors') return <InvestorsPage {...props} />;
+  if (view === 'investoraccounts') return <InvestorAccountsPage {...props} />;
   if (view === 'disbursement') return <DisbursementPage {...props} />;
   if (view === 'deletions') return <DeletionsPage {...props} />;
   if (view === 'reports') return <ReportsPage {...props} />;
@@ -1393,6 +1394,88 @@ function CollectionFormModal({ invoiceId, db, onClose, refresh, notify }) {
 }
 
 /* ===================== INVESTOR UNITS (maker-checker) ===================== */
+function InvestorAccountsPage({ db, search, setSearch }) {
+  // rent collected per unit (from collections -> invoices -> unit)
+  const collByInv = {};
+  (db.collections || []).forEach((c) => { collByInv[c.invoiceId] = (collByInv[c.invoiceId] || 0) + (+c.amount || 0); });
+  const rentCollectedByUnit = {};
+  (db.invoices || []).forEach((inv) => {
+    if (inv.type && !['MG', 'RevShare', 'Rent'].includes(inv.type)) return; // rent-type invoices only
+    const got = collByInv[inv.id] || 0;
+    if (!inv.unitId) return;
+    rentCollectedByUnit[inv.unitId] = (rentCollectedByUnit[inv.unitId] || 0) + got;
+  });
+
+  // disbursed per investor name (net paid, non-void)
+  const disbursedByInvestor = {};
+  const pendingByInvestor = {};
+  (db.disbursals || []).forEach((d) => {
+    if (d.status === 'Void') return;
+    const key = (d.investorName || '').trim().toLowerCase();
+    if (d.status === 'Processed' || d.status === 'Approved') disbursedByInvestor[key] = (disbursedByInvestor[key] || 0) + (+d.netPayable || 0);
+    else pendingByInvestor[key] = (pendingByInvestor[key] || 0) + (+d.netPayable || 0);
+  });
+
+  // build per-investor accounts from investor units
+  const acct = {};
+  (db.investorUnits || []).forEach((iv) => {
+    if (iv.status !== 'Approved') return;
+    const unitRent = rentCollectedByUnit[iv.unitId] || 0;
+    (iv.investors || []).forEach((inv) => {
+      const key = (inv.name || '').trim().toLowerCase();
+      if (!acct[key]) acct[key] = { name: inv.name, units: new Set(), share: 0, nri: inv.nri };
+      acct[key].units.add(iv.unitId);
+      acct[key].share += unitRent * ((+inv.disbursePct || 0) / 100);
+    });
+  });
+
+  let rows = Object.entries(acct).map(([key, a]) => {
+    const disbursed = disbursedByInvestor[key] || 0;
+    const pending = pendingByInvestor[key] || 0;
+    return {
+      name: a.name, nri: a.nri, units: a.units.size,
+      entitled: a.share, disbursed, pending,
+      balance: Math.max(0, a.share - disbursed)
+    };
+  });
+  const q = (search || '').toLowerCase();
+  if (q) rows = rows.filter((r) => r.name.toLowerCase().includes(q));
+  rows.sort((a, b) => b.entitled - a.entitled);
+
+  const tot = rows.reduce((t, r) => ({ e: t.e + r.entitled, d: t.d + r.disbursed, b: t.b + r.balance }), { e: 0, d: 0, b: 0 });
+
+  return (
+    <>
+      <Callout>Investor entitlement = rent collected on each owned unit × the investor's disbursement %. Balance = entitled − disbursed. This reconciles collections to investor distributions.</Callout>
+      <div className="kpirow" style={{ margin: '14px 0 16px', gridTemplateColumns: 'repeat(3,1fr)' }}>
+        <div className="kpi"><div className="kpi-l">Entitled (from collections)</div><div className="kpi-v">{money0(tot.e)}</div></div>
+        <div className="kpi"><div className="kpi-l">Disbursed</div><div className="kpi-v" style={{ color: 'var(--green)' }}>{money0(tot.d)}</div></div>
+        <div className="kpi"><div className="kpi-l">Balance payable</div><div className="kpi-v" style={{ color: 'var(--amber)' }}>{money0(tot.b)}</div></div>
+      </div>
+      <div className="toolbar"><SearchBox placeholder="Search investor…" value={search} onChange={setSearch} /></div>
+      <div className="tablewrap">
+        {rows.length === 0 ? <EmptyMini text="No approved investor units with collected rent yet." /> : (
+          <table>
+            <thead><tr><th>Investor</th><th className="num">Units</th><th className="num">Entitled (₹)</th><th className="num">Disbursed (₹)</th><th className="num">Pending appr. (₹)</th><th className="num">Balance (₹)</th></tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.name} {r.nri && <Pill color="blue">NRI</Pill>}</td>
+                  <td className="num sub">{r.units}</td>
+                  <td className="num">{money0(r.entitled)}</td>
+                  <td className="num" style={{ color: 'var(--green)' }}>{money0(r.disbursed)}</td>
+                  <td className="num sub">{r.pending > 0 ? money0(r.pending) : '—'}</td>
+                  <td className="num strong" style={{ color: r.balance > 0 ? 'var(--amber)' : 'inherit' }}>{money0(r.balance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
 function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, notify, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.investors) || []);
   const rows = db.investorUnits.filter((iv) => !search || [iv.code, nameOf(db.units, iv.unitId), iv.investors.map((x) => x.name).join(' ')].join(' ').toLowerCase().includes(search.toLowerCase()));
