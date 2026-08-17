@@ -86,8 +86,16 @@ export const MASTER_SCHEMA = {
       { k: 'address', l: 'Site / correspondence address', type: 'textarea', ph: 'Store address at asset' },
       { k: 'billingRemarks', l: 'Remarks', type: 'textarea' }
     ],
-    head: ['Code', 'Brand', 'Company', 'Type', 'Stage', 'Tenure', 'SD (₹)'],
-    cols: (r, db) => [r.code, r.name, nameOf(db.companies, r.companyId), r.brandType || r.category || '—', r.stage || '—', r.tenureYears ? r.tenureYears + ' yr' : '—', r.securityDeposit ? (+r.securityDeposit).toLocaleString('en-IN') : '—']
+    head: ['Code', 'Brand', 'Company', 'Projects', 'Type', 'Stage', 'Tenure', 'SD (₹)'],
+    cols: (r, db) => {
+      const projectNames = [...new Set((db.leases || [])
+        .filter((l) => l.brandId === r.id)
+        .map((l) => { const u = findById(db.units, l.unitId); const a = u && findById(db.assets, u.assetId); return a?.name; })
+        .filter(Boolean))];
+      return [r.code, r.name, nameOf(db.companies, r.companyId), projectNames.length ? projectNames.join(', ') : '—',
+        r.brandType || r.category || '—', r.stage || '—', r.tenureYears ? r.tenureYears + ' yr' : '—',
+        r.securityDeposit ? (+r.securityDeposit).toLocaleString('en-IN') : '—'];
+    }
   },
   users: {
     sing: 'User',
@@ -148,7 +156,7 @@ export const PAGES = {
   assets: { t: 'Asset Master', s: 'Properties under management' },
   blocks: { t: 'Block Master', s: 'Wings/blocks within an asset' },
   units: { t: 'Unit Master', s: 'Leasable units with carpet & built-up area' },
-  brands: { t: 'Brand Master', s: 'Tenant brands and categories' },
+  brands: { t: 'Brand Master', s: 'Tenant brands, categories and the project(s) each operates in' },
   users: { t: 'User Master', s: 'Panel users and role hierarchy' },
   leases: { t: 'Leases', s: 'Rental structures: MG, revenue share, CAM & utility' },
   sales: { t: 'Sales — Revenue Share', s: "Monthly brand sales that drive revenue-share billing" },
