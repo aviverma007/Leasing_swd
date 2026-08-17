@@ -202,3 +202,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal);bo
 .iu-name{font-weight:700;font-size:13px;color:var(--ink)}
 .iu-sub{font-size:11px;color:var(--muted);margin:1px 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .iu-area{font-size:10.5px;color:var(--faint)}
+
+/* project switcher in topbar */
+.proj-switch{display:flex;align-items:center;gap:7px;margin-left:auto;margin-right:12px}
+.proj-switch label{font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted)}
+.proj-switch select{padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:13px;color:var(--ink);font-weight:600;max-width:200px}

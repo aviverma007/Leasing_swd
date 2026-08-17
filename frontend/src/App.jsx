@@ -19,6 +19,7 @@ export default function App() {
   const [pendingDel, setPendingDel] = useState({}); // entity -> [recordIds] with pending deletion
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('dashboard');
+  const [currentProject, setCurrentProject] = useState('all'); // asset id or 'all'
   const [search, setSearch] = useState('');
   const [filterVal, setFilterVal] = useState('');
   const [actingRole, setActingRole] = useState('Finance Head');
@@ -123,6 +124,26 @@ export default function App() {
   const page = PAGES[view];
   const pendingDelCount = Object.values(pendingDel || {}).reduce((s, arr) => s + (arr ? arr.length : 0), 0);
 
+  // Scope data to the selected project (asset). Brands can span projects, so keep all.
+  const scopedDb = (() => {
+    if (currentProject === 'all') return db;
+    const p = currentProject;
+    const unitIds = new Set((db.units || []).filter((u) => u.assetId === p).map((u) => u.id));
+    const leaseIds = new Set((db.leases || []).filter((l) => l.assetId === p || unitIds.has(l.unitId)).map((l) => l.id));
+    const invIds = new Set((db.invoices || []).filter((i) => unitIds.has(i.unitId) || leaseIds.has(i.leaseId)).map((i) => i.id));
+    return {
+      ...db,
+      assets: (db.assets || []).filter((a) => a.id === p),
+      blocks: (db.blocks || []).filter((b) => b.assetId === p),
+      units: (db.units || []).filter((u) => u.assetId === p),
+      leases: (db.leases || []).filter((l) => leaseIds.has(l.id)),
+      invoices: (db.invoices || []).filter((i) => invIds.has(i.id)),
+      collections: (db.collections || []).filter((c) => invIds.has(c.invoiceId)),
+      investorUnits: (db.investorUnits || []).filter((iv) => unitIds.has(iv.unitId)),
+      sales: (db.sales || []).filter((s) => leaseIds.has(s.leaseId))
+    };
+  })();
+
   return (
     <div className="app">
       <aside className={`rail${railOpen ? ' show' : ''}`}>
@@ -133,7 +154,7 @@ export default function App() {
               {n.label}
               {n.v === 'deletions'
                 ? (pendingDelCount > 0 && <span className="cnt alert">{pendingDelCount}</span>)
-                : (db[n.v] && <span className="cnt">{db[n.v].length}</span>)}
+                : (scopedDb[n.v] && <span className="cnt">{scopedDb[n.v].length}</span>)}
             </a>
           ))}
         </nav>
@@ -159,6 +180,15 @@ export default function App() {
             <svg viewBox="0 0 24 24" width="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h18M3 6h18M3 18h18" /></svg>
           </div>
           <div className="tt"><h2>{page.t}</h2><p>{page.s}</p></div>
+          {db.assets && db.assets.length > 1 && (
+            <div className="proj-switch">
+              <label>Project</label>
+              <select value={currentProject} onChange={(e) => setCurrentProject(e.target.value)}>
+                <option value="all">All projects</option>
+                {db.assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
           <PageAction view={view} setModal={setModal} db={db} actingRole={actingRole} />
           <div className="topbar-user">
             <div className="who"><b>{authUser.email}</b>{authUser.isAdmin ? 'Admin' : authUser.role}</div>
@@ -167,7 +197,7 @@ export default function App() {
         </div>
         <div className="wrap">
           {loading ? <div className="empty"><p>Loading…</p></div> : (
-            <ViewRouter view={view} db={db} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
+            <ViewRouter view={view} db={scopedDb} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
               actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} pendingDel={pendingDel} />
           )}
         </div>
