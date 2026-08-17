@@ -117,6 +117,7 @@ export const RENTAL_HINT = {
 
 export const NAV = [
   { v: 'dashboard', label: 'Dashboard', grp: null },
+  { v: 'inventory', label: 'Inventory' },
   { grp: 'Masters' },
   { v: 'companies', label: 'Company' },
   { v: 'assets', label: 'Asset' },
@@ -140,6 +141,7 @@ export const NAV = [
 
 export const PAGES = {
   dashboard: { t: 'Dashboard', s: 'Portfolio, billing and disbursement at a glance' },
+  inventory: { t: 'Inventory', s: 'Units by project, block and floor with occupancy status' },
   companies: { t: 'Company Master', s: 'Legal entities that own brands' },
   assets: { t: 'Asset Master', s: 'Properties under management' },
   blocks: { t: 'Block Master', s: 'Wings/blocks within an asset' },

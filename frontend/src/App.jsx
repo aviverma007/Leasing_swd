@@ -212,6 +212,7 @@ function ViewRouter(props) {
   const MASTER_KEYS = ['companies', 'assets', 'blocks', 'units', 'brands', 'users'];
   if (MASTER_KEYS.includes(view)) return <MasterListPage {...props} entity={view} />;
   if (view === 'dashboard') return <Dashboard {...props} />;
+  if (view === 'inventory') return <InventoryPage {...props} />;
   if (view === 'leases') return <LeasesPage {...props} />;
   if (view === 'sales') return <SalesPage {...props} />;
   if (view === 'invoices') return <InvoicesPage {...props} />;
@@ -424,6 +425,116 @@ function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin
 }
 
 /* ===================== DASHBOARD ===================== */
+function InventoryPage({ db, search, setSearch }) {
+  const [proj, setProj] = useState('all');
+  // lease lookup: unitId -> active lease (for brand + status)
+  const leaseByUnit = {};
+  (db.leases || []).forEach((l) => { leaseByUnit[l.unitId] = l; });
+
+  const assets = db.assets || [];
+  const shownAssets = proj === 'all' ? assets : assets.filter((a) => a.id === proj);
+
+  const q = (search || '').toLowerCase();
+  const unitMatches = (u) => !q || [u.name, u.owner, nameOf(db.brands, leaseByUnit[u.id]?.brandId)].join(' ').toLowerCase().includes(q);
+
+  // roll-up counts for an array of units
+  const tally = (units) => {
+    const t = { total: units.length, leased: 0, vacant: 0, selfuse: 0, area: 0 };
+    units.forEach((u) => {
+      const l = leaseByUnit[u.id];
+      const sf = (u.availableFor || '').toLowerCase();
+      if (l) t.leased++;
+      else if (sf.includes('self')) t.selfuse++;
+      else t.vacant++;
+      t.area += (+u.builtupArea || 0);
+    });
+    return t;
+  };
+
+  const allUnits = (db.units || []).filter(unitMatches);
+  const grand = tally(allUnits);
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="field" style={{ maxWidth: 280, margin: 0 }}>
+          <select value={proj} onChange={(e) => setProj(e.target.value)}>
+            <option value="all">All projects</option>
+            {assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <SearchBox placeholder="Search unit, owner or brand…" value={search} onChange={setSearch} />
+      </div>
+
+      <div className="kpirow" style={{ marginBottom: 16 }}>
+        <div className="kpi"><div className="kpi-l">Total units</div><div className="kpi-v">{grand.total}</div></div>
+        <div className="kpi"><div className="kpi-l">Leased</div><div className="kpi-v" style={{ color: 'var(--green)' }}>{grand.leased}</div></div>
+        <div className="kpi"><div className="kpi-l">Vacant</div><div className="kpi-v" style={{ color: 'var(--amber)' }}>{grand.vacant}</div></div>
+        <div className="kpi"><div className="kpi-l">Self-use</div><div className="kpi-v">{grand.selfuse}</div></div>
+        <div className="kpi"><div className="kpi-l">Built-up area (sq ft)</div><div className="kpi-v">{grand.area.toLocaleString('en-IN')}</div></div>
+      </div>
+
+      {shownAssets.map((asset) => {
+        const assetUnits = allUnits.filter((u) => u.assetId === asset.id);
+        if (!assetUnits.length) return null;
+        const at = tally(assetUnits);
+        const blocks = (db.blocks || []).filter((b) => b.assetId === asset.id);
+        return (
+          <div className="inv-project" key={asset.id}>
+            <div className="inv-project-hd">
+              <div><h3>{asset.name}</h3><span className="sub">{asset.city || ''}</span></div>
+              <div className="inv-chips">
+                <span className="chip">{at.total} units</span>
+                <span className="chip green">{at.leased} leased</span>
+                <span className="chip amber">{at.vacant} vacant</span>
+                {at.selfuse > 0 && <span className="chip">{at.selfuse} self-use</span>}
+              </div>
+            </div>
+            {blocks.map((block) => {
+              const blockUnits = assetUnits.filter((u) => u.blockId === block.id);
+              if (!blockUnits.length) return null;
+              const bt = tally(blockUnits);
+              // group by floor
+              const floors = [...new Set(blockUnits.map((u) => u.floor ?? 0))].sort((a, b) => a - b);
+              return (
+                <div className="inv-block" key={block.id}>
+                  <div className="inv-block-hd">
+                    <b>{block.name}</b>
+                    <span className="sub">{bt.total} units · {bt.leased} leased · {bt.vacant} vacant</span>
+                  </div>
+                  {floors.map((fl) => {
+                    const fUnits = blockUnits.filter((u) => (u.floor ?? 0) === fl).sort((a, b) => a.name.localeCompare(b.name));
+                    return (
+                      <div className="inv-floor" key={fl}>
+                        <div className="inv-floor-lbl">Floor {fl}</div>
+                        <div className="inv-units">
+                          {fUnits.map((u) => {
+                            const l = leaseByUnit[u.id];
+                            const sf = (u.availableFor || '').toLowerCase();
+                            const cls = l ? 'leased' : sf.includes('self') ? 'selfuse' : 'vacant';
+                            return (
+                              <div className={`inv-unit ${cls}`} key={u.id} title={l ? nameOf(db.brands, l.brandId) : (u.owner || '')}>
+                                <div className="iu-name">{u.name}</div>
+                                <div className="iu-sub">{l ? nameOf(db.brands, l.brandId) : (sf.includes('self') ? 'Self-use' : 'Vacant')}</div>
+                                <div className="iu-area">{(+u.builtupArea || 0).toLocaleString('en-IN')} sq ft</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      {shownAssets.every((a) => !allUnits.some((u) => u.assetId === a.id)) && <EmptyMini text="No units match." />}
+    </>
+  );
+}
+
 function Dashboard({ db }) {
   const totalUnits = db.units.length;
   const leasedUnits = db.units.filter((u) => u.status === 'Leased').length;
