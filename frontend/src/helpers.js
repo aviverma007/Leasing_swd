@@ -41,29 +41,29 @@ export const MASTER_SCHEMA = {
     cols: (r) => [r.code, r.name]
   },
   assets: {
-    sing: 'Asset',
+    sing: 'Project',
     fields: [{ k: 'name', l: 'Asset name', req: 1, ph: 'Meridian Mall' }, { k: 'city', l: 'City', ph: 'Mumbai' }],
-    head: ['Code', 'Asset', 'City'],
+    head: ['Code', 'Project', 'City'],
     cols: (r) => [r.code, r.name, r.city || '—']
   },
   blocks: {
     sing: 'Block',
-    fields: [{ k: 'name', l: 'Block name', req: 1, ph: 'North Wing' }, { k: 'assetId', l: 'Asset', req: 1, ref: 'assets' }, { k: 'totalFloors', l: 'Total floors', type: 'number', ph: '4' }],
-    head: ['Code', 'Block', 'Asset', 'Floors'],
+    fields: [{ k: 'name', l: 'Block name', req: 1, ph: 'North Wing' }, { k: 'assetId', l: 'Project', req: 1, ref: 'assets' }, { k: 'totalFloors', l: 'Total floors', type: 'number', ph: '4' }],
+    head: ['Code', 'Block', 'Project', 'Floors'],
     cols: (r, db) => [r.code, r.name, nameOf(db.assets, r.assetId), `${r.totalFloors || 0} floors`]
   },
   units: {
     sing: 'Unit',
     fields: [
       { k: 'name', l: 'Unit name / no', req: 1, ph: 'N-101' },
-      { k: 'assetId', l: 'Asset', req: 1, ref: 'assets' },
+      { k: 'assetId', l: 'Project', req: 1, ref: 'assets' },
       { k: 'blockId', l: 'Block', req: 1, ref: 'blocks' },
       { k: 'floor', l: 'Floor', type: 'number', ph: '1' },
       { k: 'carpetArea', l: 'Carpet area (sq ft)', type: 'number', ph: '2200' },
       { k: 'builtupArea', l: 'Built-up area (sq ft)', type: 'number', ph: '2600' },
       { k: 'owner', l: 'Owner (customer)', ph: 'Unit owner name' }
     ],
-    head: ['Code', 'Unit', 'Asset', 'Owner', 'Carpet', 'Built-up', 'Status'],
+    head: ['Code', 'Unit', 'Project', 'Owner', 'Carpet', 'Built-up', 'Status'],
     cols: (r, db) => [r.code, r.name, nameOf(db.assets, r.assetId), r.owner || '—', (+r.carpetArea || 0).toLocaleString('en-IN'), (+r.builtupArea || 0).toLocaleString('en-IN'), r.status]
   },
   brands: {
@@ -128,7 +128,7 @@ export const NAV = [
   { v: 'inventory', label: 'Inventory' },
   { grp: 'Masters' },
   { v: 'companies', label: 'Company' },
-  { v: 'assets', label: 'Asset' },
+  { v: 'assets', label: 'Projects' },
   { v: 'blocks', label: 'Block' },
   { v: 'units', label: 'Unit' },
   { v: 'brands', label: 'Brand' },
@@ -153,7 +153,7 @@ export const PAGES = {
   dashboard: { t: 'Dashboard', s: 'Portfolio, billing and disbursement at a glance' },
   inventory: { t: 'Inventory', s: 'Units by project, block and floor with occupancy status' },
   companies: { t: 'Company Master', s: 'Legal entities that own brands' },
-  assets: { t: 'Asset Master', s: 'Properties under management' },
+  assets: { t: 'Project Master', s: 'Properties under management' },
   blocks: { t: 'Block Master', s: 'Wings/blocks within an asset' },
   units: { t: 'Unit Master', s: 'Leasable units with carpet & built-up area' },
   brands: { t: 'Brand Master', s: 'Tenant brands, categories and the project(s) each operates in' },

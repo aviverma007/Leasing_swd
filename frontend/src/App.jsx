@@ -257,7 +257,7 @@ function ViewRouter(props) {
 }
 
 /* ===================== MASTERS (generic CRUD) ===================== */
-function MasterListPage({ entity, db, search, setSearch, setModal, refresh, notify, canEditView, pendingDel }) {
+function MasterListPage({ entity, db, search, setSearch, setModal, refresh, notify, canEditView, pendingDel, openInventoryUnit }) {
   const sc = MASTER_SCHEMA[entity];
   const pendingIds = new Set((pendingDel && pendingDel[entity]) || []);
   const rows = (db[entity] || []).filter((r) => !search || JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
@@ -267,38 +267,83 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
     catch (e) { notify(e.message, true); }
   };
 
+  const renderRow = (r) => (
+    <tr key={r.id}>
+      {sc.cols(r, db).map((c, i) => <td key={i}>{i === 0 ? <span className="code">{c}</span> : c}</td>)}
+      <td className="rowact">
+        {pendingIds.has(r.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
+          <>
+            {entity === 'users' && <button className="iconbtn" title="Reset password" onClick={() => setModal({ type: 'resetPassword', user: r })}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15 8m0 0l3 3m-3-3l2.5-2.5" /></svg>
+            </button>}
+            <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'master', entity, id: r.id })}><EditIcon /></button>
+            <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteMaster', entity, id: r.id, name: r.name })}><DelIcon /></button>
+          </>
+        ) : <span className="sub">—</span>}
+      </td>
+    </tr>
+  );
+
+  const renderTable = (rowSet) => (
+    <table>
+      <thead><tr>{sc.head.map((h) => <th key={h}>{h}</th>)}<th></th></tr></thead>
+      <tbody>
+        {rowSet.length === 0 ? <tr><td colSpan={sc.head.length + 1} style={{ textAlign: 'center', color: 'var(--muted)', padding: 28 }}>No records match your search.</td></tr> :
+          rowSet.map(renderRow)}
+      </tbody>
+    </table>
+  );
+
+  // Entities that are structured project-wise: grouped into a separate table per project.
+  const PROJECT_GROUPED = ['blocks', 'units', 'brands'];
+  const isGrouped = PROJECT_GROUPED.includes(entity);
+
+  let groups = null;
+  if (isGrouped) {
+    const byProject = {}; // assetId -> rows
+    const unassigned = [];
+    if (entity === 'brands') {
+      // a brand can span projects: place it under every project it has a lease in
+      rows.forEach((r) => {
+        const projIds = [...new Set((db.leases || [])
+          .filter((l) => l.brandId === r.id)
+          .map((l) => { const u = findById(db.units, l.unitId); return u?.assetId; })
+          .filter(Boolean))];
+        if (!projIds.length) unassigned.push(r);
+        else projIds.forEach((pid) => { (byProject[pid] = byProject[pid] || []).push(r); });
+      });
+    } else {
+      rows.forEach((r) => {
+        const pid = r.assetId;
+        if (!pid) unassigned.push(r);
+        else (byProject[pid] = byProject[pid] || []).push(r);
+      });
+    }
+    groups = (db.assets || [])
+      .filter((a) => byProject[a.id] && byProject[a.id].length)
+      .map((a) => ({ id: a.id, label: a.name, rows: byProject[a.id] }));
+    if (unassigned.length) groups.push({ id: '__unassigned', label: 'Not yet assigned to a project', rows: unassigned });
+  }
+
   return (
     <>
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
       <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
         <SearchBox placeholder={`Search ${sc.sing.toLowerCase()}…`} value={search} onChange={setSearch} />
       </div>
-      <div className="tablewrap">
-        {db[entity].length === 0 ? <EmptyState thing={sc.sing} onAdd={canEditView ? () => setModal({ type: 'master', entity }) : null} /> : (
-          <table>
-            <thead><tr>{sc.head.map((h) => <th key={h}>{h}</th>)}<th></th></tr></thead>
-            <tbody>
-              {rows.length === 0 ? <tr><td colSpan={sc.head.length + 1} style={{ textAlign: 'center', color: 'var(--muted)', padding: 28 }}>No records match your search.</td></tr> :
-                rows.map((r) => (
-                  <tr key={r.id}>
-                    {sc.cols(r, db).map((c, i) => <td key={i}>{i === 0 ? <span className="code">{c}</span> : c}</td>)}
-                    <td className="rowact">
-                      {pendingIds.has(r.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
-                        <>
-                          {entity === 'users' && <button className="iconbtn" title="Reset password" onClick={() => setModal({ type: 'resetPassword', user: r })}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15 8m0 0l3 3m-3-3l2.5-2.5" /></svg>
-                          </button>}
-                          <button className="iconbtn" title="Edit" onClick={() => setModal({ type: 'master', entity, id: r.id })}><EditIcon /></button>
-                          <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteMaster', entity, id: r.id, name: r.name })}><DelIcon /></button>
-                        </>
-                      ) : <span className="sub">—</span>}
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {db[entity].length === 0 ? (
+        <div className="tablewrap"><EmptyState thing={sc.sing} onAdd={canEditView ? () => setModal({ type: 'master', entity }) : null} /></div>
+      ) : isGrouped ? (
+        groups.length === 0 ? <div className="tablewrap"><EmptyMini text="No records match your search." /></div> :
+          groups.map((g) => (
+            <div className="proj-group" key={g.id}>
+              <div className="proj-group-hd"><h3>{g.label}</h3><span className="chip">{g.rows.length}</span></div>
+              <div className="tablewrap">{renderTable(g.rows)}</div>
+            </div>
+          ))
+      ) : (
+        <div className="tablewrap">{renderTable(rows)}</div>
+      )}
     </>
   );
 }
@@ -459,6 +504,7 @@ function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin
 /* ===================== DASHBOARD ===================== */
 function InventoryPage({ db, search, setSearch }) {
   const [proj, setProj] = useState('all');
+  const [openUnit, setOpenUnit] = useState(null);
   // lease lookup: unitId -> active lease (for brand + status)
   const leaseByUnit = {};
   (db.leases || []).forEach((l) => { leaseByUnit[l.unitId] = l; });
@@ -545,7 +591,7 @@ function InventoryPage({ db, search, setSearch }) {
                             const sf = (u.availableFor || '').toLowerCase();
                             const cls = l ? 'leased' : sf.includes('self') ? 'selfuse' : 'vacant';
                             return (
-                              <div className={`inv-unit ${cls}`} key={u.id} title={l ? nameOf(db.brands, l.brandId) : (u.owner || '')}>
+                              <div className={`inv-unit ${cls} clickable`} key={u.id} title={l ? nameOf(db.brands, l.brandId) : (u.owner || '')} onClick={() => setOpenUnit(u)}>
                                 <div className="iu-name">{u.name}</div>
                                 <div className="iu-sub">{l ? nameOf(db.brands, l.brandId) : (sf.includes('self') ? 'Self-use' : 'Vacant')}</div>
                                 <div className="iu-area">{(+u.builtupArea || 0).toLocaleString('en-IN')} sq ft</div>
@@ -563,9 +609,79 @@ function InventoryPage({ db, search, setSearch }) {
         );
       })}
       {shownAssets.every((a) => !allUnits.some((u) => u.assetId === a.id)) && <EmptyMini text="No units match." />}
+      {openUnit && <UnitDetailSlide unit={openUnit} db={db} onClose={() => setOpenUnit(null)} />}
     </>
   );
 }
+
+function UnitDetailSlide({ unit, db, onClose }) {
+  const lease = (db.leases || []).find((l) => l.unitId === unit.id);
+  const brand = lease ? findById(db.brands, lease.brandId) : null;
+  const block = findById(db.blocks, unit.blockId);
+  const asset = findById(db.assets, unit.assetId);
+  const iu = (db.investorUnits || []).find((x) => x.unitId === unit.id);
+  const unitInvoices = (db.invoices || []).filter((i) => i.unitId === unit.id);
+  const invoiced = unitInvoices.reduce((s, i) => s + (+i.total || 0), 0);
+  const collByInv = {};
+  (db.collections || []).forEach((c) => { collByInv[c.invoiceId] = (collByInv[c.invoiceId] || 0) + (+c.amount || 0); });
+  const collected = unitInvoices.reduce((s, i) => s + (collByInv[i.id] || 0), 0);
+
+  const sf = (unit.availableFor || '').toLowerCase();
+  const statusLabel = lease ? 'Leased' : sf.includes('self') ? 'Self-use' : 'Vacant';
+  const statusColor = lease ? 'green' : sf.includes('self') ? 'grey' : 'amber';
+
+  return (
+    <>
+      <div className="slide-scrim" onClick={onClose} />
+      <div className="slide-panel">
+        <div className="slide-hd">
+          <div><h3>{unit.name}</h3><span className="sub">{asset?.name} · {block?.name} · Floor {unit.floor ?? 0}</span></div>
+          <button className="iconbtn" onClick={onClose}><CloseIcon /></button>
+        </div>
+        <div className="slide-body">
+          <div className="slide-status"><Pill color={statusColor}>{statusLabel}</Pill></div>
+
+          <div className="sectlabel big">Unit</div>
+          <div className="kv"><span>Carpet area</span><b>{(+unit.carpetArea || 0).toLocaleString('en-IN')} sq ft</b></div>
+          <div className="kv"><span>Built-up area</span><b>{(+unit.builtupArea || 0).toLocaleString('en-IN')} sq ft</b></div>
+          <div className="kv"><span>Owner / customer</span><b>{unit.owner || '—'}</b></div>
+
+          {lease && brand ? (
+            <>
+              <div className="sectlabel big">Lease</div>
+              <div className="kv"><span>Brand</span><b>{brand.name}</b></div>
+              <div className="kv"><span>Type</span><b>{lease.rentalType}</b></div>
+              <div className="kv"><span>Term</span><b>{fmtDate(lease.startDate)} → {fmtDate(lease.endDate)}</b></div>
+              <div className="kv"><span>MG</span><b>{lease.mg ? money0(lease.mg) + (lease.mgBasis === 'PerSqFt' ? '/sq ft' : '') : '—'}</b></div>
+              {lease.revSharePct > 0 && <div className="kv"><span>Revenue share</span><b>{lease.revSharePct}%</b></div>}
+              <div className="kv"><span>Security deposit</span><b>{lease.deposit ? money0(lease.deposit) : '—'}</b></div>
+              {lease.tenureYears && <div className="kv"><span>Tenure</span><b>{lease.tenureYears} yrs</b></div>}
+              {lease.lockinMonths && <div className="kv"><span>Lock-in</span><b>{lease.lockinMonths} months</b></div>}
+              {lease.stage && <div className="kv"><span>Stage</span><b>{lease.stage}</b></div>}
+
+              <div className="sectlabel big">Billing</div>
+              <div className="kv"><span>Invoiced</span><b>{money0(invoiced)}</b></div>
+              <div className="kv"><span>Collected</span><b style={{ color: 'var(--green)' }}>{money0(collected)}</b></div>
+              <div className="kv"><span>Outstanding</span><b style={{ color: invoiced - collected > 0 ? 'var(--amber)' : 'inherit' }}>{money0(Math.max(0, invoiced - collected))}</b></div>
+            </>
+          ) : (
+            <Callout>{sf.includes('self') ? 'This unit is marked self-use.' : 'This unit is currently vacant — no active lease.'}</Callout>
+          )}
+
+          {iu && (
+            <>
+              <div className="sectlabel big">Investor(s)</div>
+              {(iu.investors || []).map((x, i) => (
+                <div className="kv" key={i}><span>{x.name}{x.nri ? ' (NRI)' : ''}</span><b>{x.disbursePct}%</b></div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+function CloseIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>; }
 
 function Dashboard({ db }) {
   const totalUnits = db.units.length;
@@ -1206,7 +1322,7 @@ function ViewInvoiceModal({ id, db, onClose }) {
         <div className="meta">
           <div><div className="b">Billed to</div><div className="strong">{brand?.name}</div><div className="sub">{company?.name}</div><div className="sub">{brand?.regularAddress}</div></div>
           <div style={{ textAlign: 'right' }}>
-            <div className="b">Asset / Unit</div><div>{nameOf(db.assets, unit?.assetId)}</div>
+            <div className="b">Project / Unit</div><div>{nameOf(db.assets, unit?.assetId)}</div>
             <div className="sub">{unit?.name} · {ymLabel(i.ym)}</div>
             <div className="b" style={{ marginTop: 6 }}>Due</div><div>{fmtDate(i.dueDate)}</div>
           </div>
@@ -1484,6 +1600,15 @@ function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, n
     try { await api.investorUnits.approve(id, actingRole); await refresh(['investorUnits']); notify('Investor unit approved.'); }
     catch (e) { notify(e.message, true); }
   };
+  // rent collected per unit (collections -> invoices -> unit) — links Collection info to the Investor Account
+  const collByInv = {};
+  (db.collections || []).forEach((c) => { collByInv[c.invoiceId] = (collByInv[c.invoiceId] || 0) + (+c.amount || 0); });
+  const rentCollectedByUnit = {};
+  (db.invoices || []).forEach((inv) => {
+    if (inv.type && !['MG', 'RevShare', 'Rent'].includes(inv.type)) return;
+    if (!inv.unitId) return;
+    rentCollectedByUnit[inv.unitId] = (rentCollectedByUnit[inv.unitId] || 0) + (collByInv[inv.id] || 0);
+  });
   return (
     <>
       {canEditView && !mayApprove && (
@@ -1494,10 +1619,11 @@ function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, n
       <div className="tablewrap">
         {db.investorUnits.length === 0 ? <EmptyState thing="investor unit" onAdd={canEditView ? () => setModal({ type: 'investor' }) : null} /> : (
           <table>
-            <thead><tr><th>Ref</th><th>Unit</th><th>Investors</th><th className="num">Ownership</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Ref</th><th>Unit</th><th>Investors</th><th className="num">Ownership</th><th className="num">Rent collected</th><th className="num">Their share</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {rows.map((iv) => {
                 const u = findById(db.units, iv.unitId);
+                const rentCollected = rentCollectedByUnit[iv.unitId] || 0;
                 return (
                   <tr key={iv.id}>
                     <td><span className="code">{iv.code}</span></td>
@@ -1506,6 +1632,8 @@ function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, n
                       <div key={i}>{x.name} {x.nri && <Pill color="blue">NRI</Pill>} {!x.gst && <Pill color="amber">No GST</Pill>}</div>
                     ))}</td>
                     <td className="num">{iv.investors.map((x) => `${x.disbursePct}%`).join(' / ')}</td>
+                    <td className="num" style={{ color: 'var(--green)' }}>{money0(rentCollected)}</td>
+                    <td className="num">{iv.investors.map((x) => money0(rentCollected * ((+x.disbursePct || 0) / 100))).join(' / ')}</td>
                     <td>{iv.status === 'Approved' ? <Pill color="green">Approved</Pill> : <Pill color="amber">Pending</Pill>}</td>
                     <td className="rowact">
                       {pendingIds.has(iv.id) ? <Pill color="amber">Deletion pending</Pill> : (
@@ -1857,7 +1985,7 @@ function DeletionsPage({ refresh, notify }) {
   };
 
   const ENTITY_LABEL = {
-    companies: 'Company', assets: 'Asset', blocks: 'Block', units: 'Unit', brands: 'Brand', users: 'User',
+    companies: 'Company', assets: 'Project', blocks: 'Block', units: 'Unit', brands: 'Brand', users: 'User',
     leases: 'Lease', sales: 'Sales', invoices: 'Invoice', collections: 'Collection', investors: 'Investor unit'
   };
 
