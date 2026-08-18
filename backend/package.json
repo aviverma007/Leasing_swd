@@ -12,7 +12,9 @@
     "test-full": "node test-entries-full.js",
     "test-bulk": "node test-bulk.js",
     "import-real": "node import-real-data.js",
-    "reset-leasing": "node reset-leasing.js"
+    "reset-leasing": "node reset-leasing.js",
+    "import-gems2": "node import_gems2.js",
+    "import-gems2-write": "node import_gems2.js --write"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
