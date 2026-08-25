@@ -8,13 +8,18 @@ const { BRAND_FIELDS } = require('../lib/brandFields');
 const ENTITIES = {
   companies: {
     table: 'Companies', prefix: 'CO',
-    cols: ['Name'],
-    map: r => ({ id: r.Id, code: r.Code, name: r.Name })
+    cols: ['Name', 'PanNo', 'Gstin'],
+    map: r => ({ id: r.Id, code: r.Code, name: r.Name, panNo: r.PanNo, gstin: r.Gstin })
   },
   assets: {
     table: 'Assets', prefix: 'AST',
-    cols: ['Name', 'City'],
-    map: r => ({ id: r.Id, code: r.Code, name: r.Name, city: r.City })
+    cols: ['Name', 'City', 'LandlordName', 'LandlordAddress', 'Gstin', 'PanNo', 'BankName', 'BankBranch', 'BankAcc', 'BankIfsc', 'BankMicr'],
+    map: r => ({
+      id: r.Id, code: r.Code, name: r.Name, city: r.City,
+      landlordName: r.LandlordName, landlordAddress: r.LandlordAddress,
+      gstin: r.Gstin, panNo: r.PanNo,
+      bankName: r.BankName, bankBranch: r.BankBranch, bankAcc: r.BankAcc, bankIfsc: r.BankIfsc, bankMicr: r.BankMicr
+    })
   },
   blocks: {
     table: 'Blocks', prefix: 'BLK',
@@ -28,9 +33,9 @@ const ENTITIES = {
   },
   brands: {
     table: 'Brands', prefix: 'BRD',
-    cols: ['Name', 'CompanyId', 'Category', 'RegularAddress', 'Address', ...BRAND_FIELDS.map(f => f[1])],
+    cols: ['Name', 'CompanyId', 'Category', 'RegularAddress', 'Address', 'PanNo', 'Gstin', ...BRAND_FIELDS.map(f => f[1])],
     map: r => {
-      const o = { id: r.Id, code: r.Code, name: r.Name, companyId: r.CompanyId, category: r.Category, regularAddress: r.RegularAddress, address: r.Address };
+      const o = { id: r.Id, code: r.Code, name: r.Name, companyId: r.CompanyId, category: r.Category, regularAddress: r.RegularAddress, address: r.Address, panNo: r.PanNo, gstin: r.Gstin };
       for (const [key, col, type] of BRAND_FIELDS) {
         let v = r[col];
         if (v === undefined || v === null) { o[key] = null; continue; }
@@ -107,6 +112,9 @@ function router(entityKey) {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
+        PanNo: 'panNo', Gstin: 'gstin',
+        LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
+        BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',
         ...BRAND_KEYMAP
       };
@@ -147,6 +155,9 @@ function router(entityKey) {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
+        PanNo: 'panNo', Gstin: 'gstin',
+        LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
+        BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',
         ...BRAND_KEYMAP
       };

@@ -253,6 +253,10 @@ function ViewRouter(props) {
   if (view === 'disbursement') return <DisbursementPage {...props} />;
   if (view === 'deletions') return <DeletionsPage {...props} />;
   if (view === 'reports') return <ReportsPage {...props} />;
+  if (view === 'gstrecon') return <GstReconPage {...props} />;
+  if (view === 'tdsrecon') return <TdsReconPage {...props} />;
+  if (view === 'agreementrecon') return <AgreementReconPage {...props} />;
+  if (view === 'sdrecon') return <SdReconPage {...props} />;
   return null;
 }
 
@@ -476,7 +480,9 @@ function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin
     case 'generate':
       return <GenerateInvoiceModal db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'viewInvoice':
-      return <ViewInvoiceModal id={modal.id} db={db} onClose={close} />;
+      return <ViewInvoiceModal id={modal.id} db={db} onClose={close} setModal={setModal} />;
+    case 'sdAdjust':
+      return <SdAdjustModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'confirmDeleteInvoice':
       return <ConfirmModal title="Delete this invoice?" message={"Any collections against it will also be removed." + delNote} onClose={close} confirmLabel={isAdmin ? 'Delete' : 'Request deletion'}
         onConfirm={() => doDelete(() => api.invoices.remove(modal.id), ['invoices', 'collections'])} />;
@@ -714,9 +720,20 @@ function Dashboard({ db }) {
   const unpaidTotal = db.invoices.filter((i) => i.status !== 'Paid').reduce((s, i) => s + (i.balance ?? (i.total - (i.paid || 0))), 0);
   const collectedThisMonth = db.collections.filter((c) => c.date >= curYM() + '-01').reduce((s, c) => s + c.amount, 0);
   const pendingApprovals = db.investorUnits.filter((iv) => iv.status === 'Pending').length + db.disbursals.filter((d) => d.status === 'Pending').length;
-
   const recentInvoices = [...db.invoices].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1)).slice(0, 8);
   const recentDisb = [...db.disbursals].sort((a, b) => (a.no < b.no ? 1 : -1)).slice(0, 6);
+
+  // ── Client-side billing alerts ──
+  const today = new Date().toISOString().slice(0, 10);
+  const currYm = curYM();
+  const invoicedLeaseYmTypes = new Set(db.invoices.map((i) => `${i.leaseId}|${i.ym}|${i.type}`));
+  const billingDue = db.leases.filter((l) => !l.onHold && l.status === 'Active' && ['MG', 'MGvsRS'].includes(l.rentalType) && !invoicedLeaseYmTypes.has(`${l.id}|${currYm}|MG`));
+  const overdueInv = db.invoices.filter((i) => i.dueDate < today && i.status !== 'Paid').slice(0, 10);
+  const upcomingInv = db.invoices.filter((i) => {
+    const d7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    return i.dueDate >= today && i.dueDate <= d7 && i.status !== 'Paid';
+  });
+  const totalAlerts = billingDue.length + overdueInv.length + upcomingInv.length;
 
   return (
     <>
@@ -726,6 +743,55 @@ function Dashboard({ db }) {
         <div className="kpi"><div className="lab">Collected this month</div><div className="val m">{money0(collectedThisMonth)}</div><div className="sub">receipts to date</div></div>
         <div className="kpi"><div className="lab">Pending approvals</div><div className="val">{pendingApprovals}</div><div className="sub">investor units + disbursals</div></div>
       </div>
+
+      {totalAlerts > 0 && (
+        <div className="alert-panel">
+          <div className="alert-panel-hd">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" /></svg>
+            Billing &amp; Payment Alerts
+            <span className="alert-badge">{totalAlerts}</span>
+          </div>
+          <div className="alert-sections">
+            {billingDue.length > 0 && (
+              <div className="alert-section">
+                <div className="alert-section-title warn">⏰ Bills not yet raised ({currYm})</div>
+                {billingDue.slice(0, 5).map((l) => (
+                  <div className="alert-row" key={l.id}>
+                    <span className="strong">{nameOf(db.brands, l.brandId)}</span>
+                    <span className="sub"> · {nameOf(db.units, l.unitId)} · {l.rentalType}</span>
+                  </div>
+                ))}
+                {billingDue.length > 5 && <div className="sub" style={{ padding: '2px 12px' }}>+{billingDue.length - 5} more…</div>}
+              </div>
+            )}
+            {overdueInv.length > 0 && (
+              <div className="alert-section">
+                <div className="alert-section-title danger">🔴 Overdue invoices</div>
+                {overdueInv.map((i) => (
+                  <div className="alert-row" key={i.id}>
+                    <span className="code">{i.no}</span>
+                    <span> · {nameOf(db.brands, i.brandId)}</span>
+                    <span className="sub"> · Due {fmtDate(i.dueDate)} · Balance {money0(i.balance)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {upcomingInv.length > 0 && (
+              <div className="alert-section">
+                <div className="alert-section-title info">🔔 Due within 7 days</div>
+                {upcomingInv.map((i) => (
+                  <div className="alert-row" key={i.id}>
+                    <span className="code">{i.no}</span>
+                    <span> · {nameOf(db.brands, i.brandId)}</span>
+                    <span className="sub"> · Due {fmtDate(i.dueDate)} · Balance {money0(i.balance)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid2">
         <div className="panel">
           <div className="ph"><h3>Recent invoices</h3></div>
@@ -937,6 +1003,11 @@ const LEASE_SECTIONS = [
     ['brokeragePaid', 'Brokerage paid (₹)', 'num'],
     ['brokerageBalance', 'Balance (₹)', 'num'],
     ['futureBrokerage', 'Future brokerage (₹)', 'num']
+  ]],
+  ['Billing Config', [
+    ['hsnCode', 'HSN/SAC code', 'text'],
+    ['paymentTermsDays', 'Payment terms (days from invoice)', 'num'],
+    ['igstApplicable', 'IGST applicable (interstate)', ['', 'Yes', 'No']]
   ]],
   ['Remarks', [
     ['standardRemarks', 'Standard remarks', 'area'],
@@ -1329,44 +1400,171 @@ function GenerateInvoiceModal({ db, onClose, refresh, notify }) {
   );
 }
 
-function ViewInvoiceModal({ id, db, onClose }) {
+function ViewInvoiceModal({ id, db, onClose, setModal }) {
+  const [printData, setPrintData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
   const i = findById(db.invoices, id);
+
+  useEffect(() => {
+    (async () => {
+      try { setPrintData(await api.invoices.print(id)); } catch (_) { /* fallback to local data */ }
+      setLoading(false);
+    })();
+  }, [id]); // eslint-disable-line
+
   if (!i) return null;
   const brand = findById(db.brands, i.brandId);
   const unit = findById(db.units, i.unitId);
+  const asset = unit ? findById(db.assets, unit.assetId) : null;
   const company = brand ? findById(db.companies, brand.companyId) : null;
+
+  // Resolve print-context landlord/tenant data (prefer server-fetched, fallback to local)
+  const landlord = printData?.landlord || {
+    name: asset?.landlordName || asset?.name, address: asset?.landlordAddress,
+    gstin: asset?.gstin, pan: asset?.panNo,
+    bank: { name: asset?.bankName, branch: asset?.bankBranch, acc: asset?.bankAcc, ifsc: asset?.bankIfsc, micr: asset?.bankMicr }
+  };
+  const tenant = printData?.tenant || {
+    brandName: brand?.name, companyName: company?.name,
+    address: brand?.address || brand?.regularAddress,
+    gstin: company?.gstin, pan: company?.panNo
+  };
+  const inv = printData?.invoice || i;
+  const igstMode = (inv.igstAmt || 0) > 0;
+  const cgstPct = igstMode ? 0 : (inv.gstPct || 0) / 2;
+  const sgstPct = igstMode ? 0 : (inv.gstPct || 0) / 2;
+  const igstPct = igstMode ? (inv.gstPct || 0) : 0;
+  const leaseInfo = printData?.lease;
+  const payDays = leaseInfo?.paymentTermsDays || inv.paymentTermsDays || 7;
+  const hsnCode = leaseInfo?.hsnCode || inv.hsnCode || '997212';
+
+  const printInvoice = () => window.print();
+
   return (
-    <Modal title={`Tax invoice ${i.no}`} onClose={onClose} wide
-      footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}>
-      <div className="inv">
-        <div className="top">
-          <div><h4>TAX INVOICE</h4><div className="sub">{i.no} · {i.type}</div></div>
-          <div style={{ textAlign: 'right' }}><div className="sub">IRN {i.irn}</div></div>
-        </div>
-        <div className="meta">
-          <div><div className="b">Billed to</div><div className="strong">{brand?.name}</div><div className="sub">{company?.name}</div><div className="sub">{brand?.regularAddress}</div></div>
-          <div style={{ textAlign: 'right' }}>
-            <div className="b">Project / Unit</div><div>{nameOf(db.assets, unit?.assetId)}</div>
-            <div className="sub">{unit?.name} · {ymLabel(i.ym)}</div>
-            <div className="b" style={{ marginTop: 6 }}>Due</div><div>{fmtDate(i.dueDate)}</div>
+    <Modal title={`Tax Invoice — ${i.no}`} onClose={onClose} wide
+      footer={<><button className="btn btn-ghost" onClick={printInvoice}>🖨 Print</button><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-teal btn-sm" onClick={() => { onClose(); setModal({ type: 'sdAdjust', id }); }}>SD Adjust</button></>}>
+      {loading ? <div className="empty"><p>Loading invoice…</p></div> : (
+        <div className="inv inv-print">
+          {/* Header */}
+          <div className="inv-header">
+            <div className="inv-header-left">
+              <h3>TAX INVOICE</h3>
+              <div className="inv-einvoice-note">
+                This is a computer-generated document. No physical/digital signature is required.
+              </div>
+            </div>
+            <div className="inv-header-right">
+              <div className="inv-no">{i.no}</div>
+              <div className="sub">IRN: {i.irn || '—'}</div>
+            </div>
           </div>
-        </div>
-        <table className="line"><thead><tr><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
-          <tbody><tr><td>{i.desc || i.type}</td><td className="num">{money(i.amount)}</td></tr></tbody>
-        </table>
-        <div className="tot">
-          <div className="sub">Status: <StatusPill st={i.status} overdue={i.dueDate < curYM() + '-01'} /></div>
-          <table className="ledger" style={{ width: 260 }}>
+
+          {/* Biller & Recipient */}
+          <div className="inv-parties">
+            <div className="inv-party">
+              <div className="inv-party-label">BILLED BY (LANDLORD)</div>
+              <div className="strong">{landlord.name || '—'}</div>
+              {landlord.address && <div className="sub inv-addr">{landlord.address}</div>}
+              {landlord.gstin && <div className="sub"><b>GSTIN:</b> {landlord.gstin}</div>}
+              {landlord.pan && <div className="sub"><b>PAN:</b> {landlord.pan}</div>}
+            </div>
+            <div className="inv-party" style={{ textAlign: 'right' }}>
+              <div className="inv-party-label">BILLED TO (TENANT)</div>
+              <div className="strong">{tenant.brandName || '—'}</div>
+              {tenant.companyName && <div className="sub">{tenant.companyName}</div>}
+              {tenant.address && <div className="sub inv-addr">{tenant.address}</div>}
+              {tenant.gstin && <div className="sub"><b>GSTIN:</b> {tenant.gstin}</div>}
+              {tenant.pan && <div className="sub"><b>PAN:</b> {tenant.pan}</div>}
+            </div>
+          </div>
+
+          {/* Invoice meta */}
+          <div className="inv-meta-grid">
+            <div><span className="inv-meta-lbl">Invoice date</span><br />{fmtDate(i.dueDate)}</div>
+            <div><span className="inv-meta-lbl">Due date</span><br /><b>{fmtDate(i.dueDate)}</b></div>
+            <div><span className="inv-meta-lbl">Payment terms</span><br />{payDays} days from invoice date</div>
+            <div><span className="inv-meta-lbl">Period</span><br />{ymLabel(i.ym)}</div>
+            <div><span className="inv-meta-lbl">Unit / Premises</span><br />{unit?.name} · {asset?.name}</div>
+            <div><span className="inv-meta-lbl">Status</span><br /><StatusPill st={i.status} overdue={i.dueDate < curYM() + '-01'} /></div>
+          </div>
+
+          {/* Line items */}
+          <table className="line">
+            <thead>
+              <tr><th>Description</th><th>SAC/HSN</th><th className="num">Taxable Value</th></tr>
+            </thead>
             <tbody>
-              <tr><td>Taxable value</td><td className="r">{money(i.amount)}</td></tr>
-              <tr><td>GST ({i.gstPct}%)</td><td className="r">{money(i.gstAmt)}</td></tr>
-              <tr className="tot"><td>Total</td><td className="r">{money(i.total)}</td></tr>
-              <tr><td>Paid</td><td className="r">{money(i.paid || 0)}</td></tr>
-              <tr><td>Balance</td><td className="r">{money(i.balance ?? (i.total - (i.paid || 0)))}</td></tr>
+              <tr><td>{i.desc || i.type}</td><td className="sub">{hsnCode}</td><td className="num">{money(inv.amount)}</td></tr>
             </tbody>
           </table>
+
+          {/* Tax breakdown */}
+          <div className="inv-tax-total">
+            <div className="inv-notes">
+              <div className="inv-note"><b>TDS:</b> TDS as applicable under the Income Tax Act, 1961.</div>
+              {landlord.bank?.acc && (
+                <div className="inv-bank">
+                  <b>Bank details for payment:</b><br />
+                  {landlord.bank.name && <span>{landlord.bank.name}{landlord.bank.branch ? `, ${landlord.bank.branch}` : ''}</span>}<br />
+                  <span>A/c No: {landlord.bank.acc}</span>{landlord.bank.ifsc && <span> · IFSC: {landlord.bank.ifsc}</span>}
+                  {landlord.bank.micr && <span> · MICR: {landlord.bank.micr}</span>}
+                </div>
+              )}
+            </div>
+            <table className="ledger" style={{ width: 300 }}>
+              <tbody>
+                <tr><td>Taxable value</td><td className="r">{money(inv.amount)}</td></tr>
+                {igstMode ? (
+                  <tr><td>IGST @ {igstPct}%</td><td className="r">{money(inv.igstAmt || 0)}</td></tr>
+                ) : (
+                  <>
+                    <tr><td>CGST @ {cgstPct}%</td><td className="r">{money(inv.cgstAmt || 0)}</td></tr>
+                    <tr><td>SGST @ {sgstPct}%</td><td className="r">{money(inv.sgstAmt || 0)}</td></tr>
+                  </>
+                )}
+                <tr className="tot"><td><b>Invoice total</b></td><td className="r"><b>{money(inv.total)}</b></td></tr>
+                <tr><td>Paid</td><td className="r">{money(inv.paid || 0)}</td></tr>
+                <tr style={{ color: 'var(--amber)' }}><td><b>Balance due</b></td><td className="r"><b>{money(inv.balance ?? (inv.total - (inv.paid || 0)))}</b></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="inv-footer-note">
+            Subject to Gurugram / Haryana jurisdiction. E-invoice — physical or digital signature not required.
+          </div>
         </div>
-      </div>
+      )}
+    </Modal>
+  );
+}
+
+/* SD adjustment modal */
+function SdAdjustModal({ id, db, onClose, refresh, notify }) {
+  const i = findById(db.invoices, id);
+  const [amt, setAmt] = React.useState('');
+  const [note, setNote] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  if (!i) return null;
+  const balance = i.balance ?? (i.total - (i.paid || 0));
+
+  const save = async () => {
+    if (!amt || Number(amt) <= 0) return notify('Enter a positive SD adjustment amount.', true);
+    setBusy(true);
+    try {
+      const res = await api.invoices.sdAdjust(id, Number(amt), note);
+      await refresh(['invoices', 'collections']);
+      notify(`SD adjustment of ${money0(res.adjAmt)} applied.`);
+      onClose();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`SD Adjustment — ${i.no}`} onClose={onClose} onSave={save} saveLabel={busy ? 'Saving…' : 'Apply adjustment'}>
+      <Callout>Adjusts the security deposit amount against this invoice balance of {money0(balance)}. A receipt entry marked "SD-Adjust" will be created.</Callout>
+      <div className="field"><label>SD amount to adjust <span className="req">*</span></label>
+        <input type="number" value={amt} placeholder={`Max ${balance.toFixed(2)}`} onChange={(e) => setAmt(e.target.value)} /></div>
+      <div className="field"><label>Note</label>
+        <input type="text" value={note} placeholder="e.g. SD adjustment as per agreement clause 12" onChange={(e) => setNote(e.target.value)} /></div>
     </Modal>
   );
 }
@@ -2104,7 +2302,7 @@ function ReportsPage({ db, notify }) {
       </div>
       <div className="grid2">
         <div className="panel">
-          <div className="ph"><h3>Monthly disbursement report</h3><button className="btn btn-ghost btn-sm" onClick={exportDisb}>Export CSV</button></div>
+          <div className="ph"><h3>Monthly disbursement report</h3><button className="btn btn-ghost btn-sm" onClick={exportDisb}>⬇ Excel CSV</button></div>
           <div className="pb">
             {recentDisb.length === 0 ? <EmptyMini text="No disbursals yet." /> : (
               <table><thead><tr><th>Voucher</th><th>Month</th><th>Investor</th><th className="num">Net</th><th>Status</th></tr></thead>
@@ -2127,7 +2325,7 @@ function ReportsPage({ db, notify }) {
             </div>
           </div>
           <div className="panel" style={{ marginBottom: 16 }}>
-            <div className="ph"><h3>Deductions invoiced (RCC / fitout / stamp / brokerage)</h3></div>
+            <div className="ph"><h3>Deductions invoiced</h3></div>
             <div className="pb">
               {deductionsInvoiced.length === 0 ? <EmptyMini text="No deductions invoiced yet." /> : (
                 <table><thead><tr><th>Voucher</th><th className="num">Brokerage</th><th className="num">Fitout</th><th className="num">Stamp</th><th className="num">Mgmt</th></tr></thead>
@@ -2139,17 +2337,226 @@ function ReportsPage({ db, notify }) {
             </div>
           </div>
           <div className="panel">
-            <div className="ph"><h3>SAP entry book</h3><button className="btn btn-ghost btn-sm" onClick={exportSAP}>Export GL CSV</button></div>
+            <div className="ph"><h3>SAP entry book</h3><button className="btn btn-ghost btn-sm" onClick={exportSAP}>⬇ GL CSV</button></div>
             <div className="pb">
               {sapRows.length === 0 ? <EmptyMini text="No postings to push yet." /> : (
                 <table><thead><tr><th>GL</th><th>Doc</th><th>Type</th><th className="num">Amount</th></tr></thead>
-                  <tbody>{sapRows.slice(0, 7).map((r, i) => (
-                    <tr key={i}><td><span className="code">{r.gl}</span></td><td><span className="code">{r.doc}</span></td><td className="sub">{r.type}</td><td className="num">{money0(r.amount)}</td></tr>
+                  <tbody>{sapRows.slice(0, 7).map((r, idx) => (
+                    <tr key={idx}><td><span className="code">{r.gl}</span></td><td><span className="code">{r.doc}</span></td><td className="sub">{r.type}</td><td className="num">{money0(r.amount)}</td></tr>
                   ))}</tbody>
                 </table>
               )}
             </div>
           </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── GST Reconciliation Page ── */
+function GstReconPage({ notify }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { (async () => { try { setRows(await api.reports.gstRecon()); } catch (e) { notify(e.message, true); } })(); }, []); // eslint-disable-line
+
+  const exportCSV = () => {
+    if (!rows) return;
+    const hdr = [['Month', 'Invoices', 'Taxable Value', 'CGST Invoiced', 'SGST Invoiced', 'IGST Invoiced', 'Total GST', 'Gross Invoiced', 'Total Collected', 'Outstanding']];
+    const data = rows.map((r) => [r.ym, r.invoiceCount, r.taxableValue, r.cgstInvoiced, r.sgstInvoiced, r.igstInvoiced, r.totalGst, r.grossInvoiced, r.totalCollected, r.outstanding]);
+    download('gst_reconciliation.csv', toCSV([...hdr, ...data]));
+    notify('Exported gst_reconciliation.csv');
+  };
+
+  if (!rows) return <div className="empty"><p>Loading GST reconciliation…</p></div>;
+  const totals = rows.reduce((t, r) => ({
+    taxableValue: t.taxableValue + r.taxableValue, cgst: t.cgst + r.cgstInvoiced, sgst: t.sgst + r.sgstInvoiced,
+    igst: t.igst + r.igstInvoiced, grossInvoiced: t.grossInvoiced + r.grossInvoiced,
+    totalCollected: t.totalCollected + r.totalCollected, outstanding: t.outstanding + r.outstanding
+  }), { taxableValue: 0, cgst: 0, sgst: 0, igst: 0, grossInvoiced: 0, totalCollected: 0, outstanding: 0 });
+
+  return (
+    <>
+      <div className="kpirow" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(4,1fr)' }}>
+        <div className="kpi"><div className="kpi-l">Total taxable value</div><div className="kpi-v">{money0(totals.taxableValue)}</div></div>
+        <div className="kpi"><div className="kpi-l">Total GST (CGST+SGST+IGST)</div><div className="kpi-v">{money0(totals.cgst + totals.sgst + totals.igst)}</div></div>
+        <div className="kpi"><div className="kpi-l">Total collected</div><div className="kpi-v" style={{ color: 'var(--green)' }}>{money0(totals.totalCollected)}</div></div>
+        <div className="kpi"><div className="kpi-l">Outstanding</div><div className="kpi-v" style={{ color: 'var(--amber)' }}>{money0(totals.outstanding)}</div></div>
+      </div>
+      <div className="panel">
+        <div className="ph"><h3>GST Reconciliation — Month-wise</h3><button className="btn btn-ghost btn-sm" onClick={exportCSV}>⬇ Excel CSV</button></div>
+        <div className="pb">
+          {rows.length === 0 ? <EmptyMini text="No invoice data for GST reconciliation." /> : (
+            <table>
+              <thead><tr><th>Month</th><th className="num">Taxable</th><th className="num">CGST</th><th className="num">SGST</th><th className="num">IGST</th><th className="num">Gross Inv.</th><th className="num">Collected</th><th className="num">Outstanding</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.ym}>
+                    <td><b>{ymLabel(r.ym)}</b><div className="sub">{r.invoiceCount} invoices</div></td>
+                    <td className="num">{money0(r.taxableValue)}</td>
+                    <td className="num">{money0(r.cgstInvoiced)}</td>
+                    <td className="num">{money0(r.sgstInvoiced)}</td>
+                    <td className="num">{money0(r.igstInvoiced)}</td>
+                    <td className="num strong">{money0(r.grossInvoiced)}</td>
+                    <td className="num" style={{ color: 'var(--green)' }}>{money0(r.totalCollected)}</td>
+                    <td className="num" style={{ color: r.outstanding > 0 ? 'var(--amber)' : 'inherit' }}>{money0(r.outstanding)}</td>
+                  </tr>
+                ))}
+                <tr style={{ fontWeight: 600, borderTop: '2px solid var(--border)' }}>
+                  <td>TOTAL</td>
+                  <td className="num">{money0(totals.taxableValue)}</td>
+                  <td className="num">{money0(totals.cgst)}</td>
+                  <td className="num">{money0(totals.sgst)}</td>
+                  <td className="num">{money0(totals.igst)}</td>
+                  <td className="num">{money0(totals.grossInvoiced)}</td>
+                  <td className="num">{money0(totals.totalCollected)}</td>
+                  <td className="num">{money0(totals.outstanding)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── TDS Reconciliation Page ── */
+function TdsReconPage({ notify }) {
+  const [data, setData] = useState(null);
+  useEffect(() => { (async () => { try { setData(await api.reports.tdsRecon()); } catch (e) { notify(e.message, true); } })(); }, []); // eslint-disable-line
+
+  const exportCSV = () => {
+    if (!data) return;
+    const hdr = [['Receipt No', 'Date', 'Invoice No', 'Type', 'Month', 'Brand', 'Amt Received', 'TDS %', 'TDS Deducted', 'Instrument', 'Ref']];
+    const rows = data.rows.map((r) => [r.receiptNo, r.collDate, r.invoiceNo, r.invoiceType, r.ym, r.brandName, r.amtReceived, r.tdsPct, r.tdsDeducted, r.instrument, r.ref || '']);
+    download('tds_reconciliation.csv', toCSV([...hdr, ...rows]));
+    notify('Exported tds_reconciliation.csv');
+  };
+
+  if (!data) return <div className="empty"><p>Loading TDS reconciliation…</p></div>;
+  return (
+    <>
+      <div className="kpirow" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(2,1fr)' }}>
+        <div className="kpi"><div className="kpi-l">Total amount received</div><div className="kpi-v">{money0(data.totalAmtReceived)}</div></div>
+        <div className="kpi"><div className="kpi-l">Total TDS deducted</div><div className="kpi-v" style={{ color: 'var(--amber)' }}>{money0(data.totalTdsDeducted)}</div></div>
+      </div>
+      <div className="panel">
+        <div className="ph"><h3>TDS Deducted — Receipt-wise</h3><button className="btn btn-ghost btn-sm" onClick={exportCSV}>⬇ Excel CSV</button></div>
+        <div className="pb">
+          {data.rows.length === 0 ? <EmptyMini text="No TDS deductions recorded yet." /> : (
+            <table>
+              <thead><tr><th>Receipt</th><th>Invoice</th><th>Date</th><th>Brand</th><th>Month</th><th className="num">Amount</th><th className="num">TDS%</th><th className="num">TDS Amt</th><th>Instrument</th></tr></thead>
+              <tbody>
+                {data.rows.map((r, i) => (
+                  <tr key={i}>
+                    <td><span className="code">{r.receiptNo}</span></td>
+                    <td><span className="code">{r.invoiceNo}</span></td>
+                    <td className="sub">{fmtDate(r.collDate)}</td>
+                    <td>{r.brandName}</td>
+                    <td className="sub">{ymLabel(r.ym)}</td>
+                    <td className="num">{money0(r.amtReceived)}</td>
+                    <td className="num sub">{r.tdsPct}%</td>
+                    <td className="num strong" style={{ color: 'var(--amber)' }}>{money0(r.tdsDeducted)}</td>
+                    <td><Pill color="grey">{r.instrument}</Pill></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Agreement Reconciliation Page ── */
+function AgreementReconPage({ notify }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { (async () => { try { setRows(await api.reports.agreementRecon()); } catch (e) { notify(e.message, true); } })(); }, []); // eslint-disable-line
+
+  const exportCSV = () => {
+    if (!rows) return;
+    const hdr = [['Lease', 'Brand', 'Unit', 'Start', 'End', 'Type', 'MG', 'MG Basis', 'RS%', 'CAM', 'GST%', 'SD', 'MG Billed', 'RS Billed', 'CAM Billed', 'Total Received', 'TDS Received']];
+    const data = rows.map((r) => [r.leaseCode, r.brandName, r.unitName, r.startDate, r.endDate, r.rentalType, r.mg, r.mgBasis, r.revSharePct, r.cam, r.gst, r.deposit, r.mgBilled, r.rsBilled, r.camBilled, r.totalReceived, r.tdsReceived]);
+    download('agreement_reconciliation.csv', toCSV([...hdr, ...data]));
+    notify('Exported agreement_reconciliation.csv');
+  };
+
+  if (!rows) return <div className="empty"><p>Loading agreement reconciliation…</p></div>;
+  return (
+    <>
+      <div className="panel">
+        <div className="ph"><h3>Lease Terms vs Actual Billing</h3><button className="btn btn-ghost btn-sm" onClick={exportCSV}>⬇ Excel CSV</button></div>
+        <div className="pb">
+          {rows.length === 0 ? <EmptyMini text="No lease data yet." /> : (
+            <table>
+              <thead><tr><th>Brand / Unit</th><th>Type</th><th className="num">MG (agreed)</th><th className="num">MG Billed</th><th className="num">RS Billed</th><th className="num">CAM Billed</th><th className="num">Total Recd</th><th className="num">SD</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.leaseId}>
+                    <td><b>{r.brandName}</b><div className="sub">{r.unitName} · {r.leaseCode}</div><div className="sub">{fmtDate(r.startDate)} → {fmtDate(r.endDate)}</div></td>
+                    <td><RentTypePill t={r.rentalType} /></td>
+                    <td className="num">{money0(r.mg)}{r.mgBasis === 'PerSqFt' ? '/sqft' : ''}</td>
+                    <td className="num" style={{ color: r.mgBilled > 0 ? 'var(--green)' : 'var(--muted)' }}>{money0(r.mgBilled)}</td>
+                    <td className="num">{money0(r.rsBilled)}</td>
+                    <td className="num">{money0(r.camBilled)}</td>
+                    <td className="num strong" style={{ color: 'var(--green)' }}>{money0(r.totalReceived)}</td>
+                    <td className="num sub">{money0(r.deposit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Security Deposit Reconciliation Page ── */
+function SdReconPage({ notify }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { (async () => { try { setRows(await api.reports.sdRecon()); } catch (e) { notify(e.message, true); } })(); }, []); // eslint-disable-line
+
+  const exportCSV = () => {
+    if (!rows) return;
+    const hdr = [['Brand', 'Unit', 'Lease', 'SD Agreed', 'SD Collected', 'SD Adjusted', 'SD Balance']];
+    const data = rows.map((r) => [r.brandName, r.unitName, r.leaseCode, r.sdAgreed, r.sdCollected, r.sdAdjusted, r.sdBalance]);
+    download('sd_reconciliation.csv', toCSV([...hdr, ...data]));
+    notify('Exported sd_reconciliation.csv');
+  };
+
+  if (!rows) return <div className="empty"><p>Loading SD reconciliation…</p></div>;
+  const totals = rows.reduce((t, r) => ({ agreed: t.agreed + r.sdAgreed, collected: t.collected + r.sdCollected, adjusted: t.adjusted + r.sdAdjusted, balance: t.balance + r.sdBalance }), { agreed: 0, collected: 0, adjusted: 0, balance: 0 });
+
+  return (
+    <>
+      <div className="kpirow" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(4,1fr)' }}>
+        <div className="kpi"><div className="kpi-l">SD Agreed</div><div className="kpi-v">{money0(totals.agreed)}</div></div>
+        <div className="kpi"><div className="kpi-l">SD Collected</div><div className="kpi-v" style={{ color: 'var(--green)' }}>{money0(totals.collected)}</div></div>
+        <div className="kpi"><div className="kpi-l">SD Adjusted</div><div className="kpi-v" style={{ color: 'var(--amber)' }}>{money0(totals.adjusted)}</div></div>
+        <div className="kpi"><div className="kpi-l">SD Balance (held)</div><div className="kpi-v" style={{ color: 'var(--teal)' }}>{money0(totals.balance)}</div></div>
+      </div>
+      <div className="panel">
+        <div className="ph"><h3>Security Deposit Reconciliation</h3><button className="btn btn-ghost btn-sm" onClick={exportCSV}>⬇ Excel CSV</button></div>
+        <div className="pb">
+          {rows.length === 0 ? <EmptyMini text="No security deposits recorded yet." /> : (
+            <table>
+              <thead><tr><th>Brand / Unit</th><th className="num">SD Agreed</th><th className="num">SD Collected</th><th className="num">SD Adjusted</th><th className="num">Balance Held</th><th>Status</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.leaseId}>
+                    <td><b>{r.brandName}</b><div className="sub">{r.unitName} · {r.leaseCode}</div></td>
+                    <td className="num">{money0(r.sdAgreed)}</td>
+                    <td className="num" style={{ color: 'var(--green)' }}>{money0(r.sdCollected)}</td>
+                    <td className="num" style={{ color: 'var(--amber)' }}>{money0(r.sdAdjusted)}</td>
+                    <td className="num strong" style={{ color: 'var(--teal)' }}>{money0(r.sdBalance)}</td>
+                    <td>{r.sdBalance <= 0 ? <Pill color="green">Fully adjusted</Pill> : r.sdAdjusted > 0 ? <Pill color="amber">Partially adjusted</Pill> : <Pill color="grey">Held</Pill>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </>

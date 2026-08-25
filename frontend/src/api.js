@@ -1,7 +1,6 @@
 const BASE = '/api';
 const TOKEN_KEY = 'scoopsense_token';
 
-// Restore any saved token on load (survives page refresh; cleared when the tab closes)
 let authToken = (() => {
   try { return sessionStorage.getItem(TOKEN_KEY) || null; } catch (e) { return null; }
 })();
@@ -11,7 +10,7 @@ export function setToken(t) {
   try {
     if (t) sessionStorage.setItem(TOKEN_KEY, t);
     else sessionStorage.removeItem(TOKEN_KEY);
-  } catch (e) { /* storage unavailable — fall back to in-memory only */ }
+  } catch (e) { /* storage unavailable */ }
 }
 export function getToken() { return authToken; }
 
@@ -19,16 +18,9 @@ async function req(method, path, body) {
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
   if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-  const res = await fetch(BASE + path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined
-  });
+  const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && onAuthExpired) {
-    authToken = null;
-    onAuthExpired();
-  }
+  if (res.status === 401 && onAuthExpired) { authToken = null; onAuthExpired(); }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
@@ -64,7 +56,10 @@ export const api = {
   invoices: {
     ...crud('/invoices'),
     generate: (ym, scope) => req('POST', '/invoices/generate', { ym, scope }),
-    adhoc: (body) => req('POST', '/invoices/adhoc', body)
+    generatePool: (ym, leaseIds, desc) => req('POST', '/invoices/generate-pool', { ym, leaseIds, desc }),
+    adhoc: (body) => req('POST', '/invoices/adhoc', body),
+    print: (id) => req('GET', `/invoices/${id}/print`),
+    sdAdjust: (id, sdAdjAmt, note) => req('POST', `/invoices/${id}/sd-adjust`, { sdAdjAmt, note })
   },
   collections: crud('/collections'),
   investorUnits: {
@@ -81,7 +76,12 @@ export const api = {
   reports: {
     summary: () => req('GET', '/reports/summary'),
     sapEntries: () => req('GET', '/reports/sap-entries'),
-    log: () => req('GET', '/reports/log')
+    log: () => req('GET', '/reports/log'),
+    gstRecon: () => req('GET', '/reports/gst-recon'),
+    tdsRecon: () => req('GET', '/reports/tds-recon'),
+    agreementRecon: () => req('GET', '/reports/agreement-recon'),
+    sdRecon: () => req('GET', '/reports/sd-recon'),
+    alerts: () => req('GET', '/reports/alerts')
   },
   deletionRequests: {
     list: (status) => req('GET', '/deletion-requests' + (status ? `?status=${status}` : '')),

@@ -5,6 +5,17 @@ function mgAmount(lease, unit) {
   return lease.MgBasis === 'PerSqFt' ? (Number(lease.Mg) || 0) * (Number(unit.BuiltupArea) || 0) : (Number(lease.Mg) || 0);
 }
 
+/* GST bifurcation: intra-state → CGST+SGST; inter-state → IGST */
+function gstSplit(amount, gstPct, igstApplicable) {
+  const gstAmt = round2(amount * gstPct / 100);
+  if (igstApplicable) {
+    return { gstAmt, cgstAmt: 0, sgstAmt: 0, igstAmt: gstAmt };
+  }
+  const cgstAmt = round2(gstAmt / 2);
+  const sgstAmt = round2(gstAmt - cgstAmt); // captures any rounding residual
+  return { gstAmt, cgstAmt, sgstAmt, igstAmt: 0 };
+}
+
 async function getLease(pool, leaseId) {
   const row = await pool.request().input('id', sql.VarChar(40), leaseId).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
   return row.recordset[0];
@@ -22,29 +33,34 @@ async function invoiceExists(pool, leaseId, ym, type) {
 
 async function pushInvoice(pool, lease, type, desc, amount, ym, due) {
   if (amount <= 0) return 0;
-  const gstAmt = round2(amount * Number(lease.Gst) / 100);
+  const gstPct = Number(lease.Gst) || 0;
+  const igst = lease.IgstApplicable === true || lease.IgstApplicable === 1;
+  const { gstAmt, cgstAmt, sgstAmt, igstAmt } = gstSplit(amount, gstPct, igst);
   const total = round2(amount + gstAmt);
   const id = uid();
   const no = await nextNo(pool, sql, 'INV');
+  const hsnCode = lease.HsnCode || '997212';
+  const paymentTermsDays = lease.PaymentTermsDays || 7;
   await pool.request()
     .input('id', sql.VarChar(40), id).input('no', sql.VarChar(20), no).input('type', sql.VarChar(20), type)
     .input('leaseId', sql.VarChar(40), lease.Id).input('brandId', sql.VarChar(40), lease.BrandId).input('unitId', sql.VarChar(40), lease.UnitId)
     .input('ym', sql.Char(7), ym).input('desc', sql.NVarChar(300), desc).input('amount', sql.Decimal(18, 2), round2(amount))
-    .input('gstPct', sql.Decimal(9, 3), lease.Gst).input('gstAmt', sql.Decimal(18, 2), gstAmt).input('total', sql.Decimal(18, 2), total)
-    .input('due', sql.Date, due).input('irn', sql.VarChar(64), irnHex())
-    .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,Total,DueDate,Irn,Status)
-      VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@total,@due,@irn,'Unpaid')`);
+    .input('gstPct', sql.Decimal(9, 3), gstPct).input('gstAmt', sql.Decimal(18, 2), gstAmt)
+    .input('cgstAmt', sql.Decimal(18, 2), cgstAmt).input('sgstAmt', sql.Decimal(18, 2), sgstAmt).input('igstAmt', sql.Decimal(18, 2), igstAmt)
+    .input('total', sql.Decimal(18, 2), total).input('due', sql.Date, due).input('irn', sql.VarChar(64), irnHex())
+    .input('hsnCode', sql.VarChar(20), hsnCode).input('paymentTermsDays', sql.Int, paymentTermsDays)
+    .query(`INSERT INTO ${SCHEMA}.Invoices
+      (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays)
+      VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays)`);
   return 1;
 }
 
-// mirrors genLeaseInvoices() from the original app
 async function genLeaseInvoices(pool, leaseId, ym) {
   const lease = await getLease(pool, leaseId);
   if (!lease) return 0;
   const unit = await getUnit(pool, lease.UnitId);
   const { s: due } = monthRange(ym);
   let made = 0;
-
   if (['MG', 'MGvsRS'].includes(lease.RentalType) && !(await invoiceExists(pool, leaseId, ym, 'MG'))) {
     made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}`, mgAmount(lease, unit), ym, due);
   }
@@ -58,49 +74,45 @@ async function genLeaseInvoices(pool, leaseId, ym) {
   return made;
 }
 
-// mirrors syncRevShare() from the original app: create/adjust/delete the RevShare invoice for a month
 async function syncRevShare(pool, leaseId, ym) {
   const lease = await getLease(pool, leaseId);
   if (!lease || !['PureRS', 'MGvsRS', 'VarRS'].includes(lease.RentalType)) return;
   const unit = await getUnit(pool, lease.UnitId);
-
   const saleRow = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym)
     .query(`SELECT TOP 1 * FROM ${SCHEMA}.Sales WHERE LeaseId=@l AND Ym=@y`);
   const sales = saleRow.recordset[0] ? Number(saleRow.recordset[0].Amount) : 0;
   const rs = sales * Number(lease.RevSharePct) / 100;
   let billable = rs;
   if (lease.RentalType === 'MGvsRS') billable = Math.max(0, rs - mgAmount(lease, unit));
-
   const existingRow = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym)
     .query(`SELECT * FROM ${SCHEMA}.Invoices WHERE LeaseId=@l AND Ym=@y AND Type='RevShare'`);
   const existing = existingRow.recordset[0];
-
   if (billable <= 0) {
     if (existing) {
       const paidRow = await pool.request().input('id', sql.VarChar(40), existing.Id).query(
         `SELECT ISNULL(SUM(Amount),0) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=@id`);
-      if (Number(paidRow.recordset[0].paid) <= 0) {
+      if (Number(paidRow.recordset[0].paid) <= 0)
         await pool.request().input('id', sql.VarChar(40), existing.Id).query(`DELETE FROM ${SCHEMA}.Invoices WHERE Id=@id`);
-      }
     }
     return;
   }
-
-  const gstAmt = round2(billable * Number(lease.Gst) / 100);
+  const gstPct = Number(lease.Gst) || 0;
+  const igst = lease.IgstApplicable === true || lease.IgstApplicable === 1;
+  const { gstAmt, cgstAmt, sgstAmt, igstAmt } = gstSplit(billable, gstPct, igst);
   const total = round2(billable + gstAmt);
   const desc = `Revenue share ${lease.RevSharePct}% ${lease.RentalType === 'MGvsRS' ? '(excess over MG) ' : ''}— ${ym}`;
-
   if (existing) {
     await pool.request().input('id', sql.VarChar(40), existing.Id).input('amount', sql.Decimal(18, 2), round2(billable))
-      .input('gstAmt', sql.Decimal(18, 2), gstAmt).input('total', sql.Decimal(18, 2), total).input('desc', sql.NVarChar(300), desc)
-      .query(`UPDATE ${SCHEMA}.Invoices SET Amount=@amount, GstAmt=@gstAmt, Total=@total, Descr=@desc WHERE Id=@id`);
+      .input('gstAmt', sql.Decimal(18, 2), gstAmt).input('cgstAmt', sql.Decimal(18, 2), cgstAmt)
+      .input('sgstAmt', sql.Decimal(18, 2), sgstAmt).input('igstAmt', sql.Decimal(18, 2), igstAmt)
+      .input('total', sql.Decimal(18, 2), total).input('desc', sql.NVarChar(300), desc)
+      .query(`UPDATE ${SCHEMA}.Invoices SET Amount=@amount, GstAmt=@gstAmt, CgstAmt=@cgstAmt, SgstAmt=@sgstAmt, IgstAmt=@igstAmt, Total=@total, Descr=@desc WHERE Id=@id`);
   } else {
     const { s: due } = monthRange(ym);
     await pushInvoice(pool, lease, 'RevShare', desc, billable, ym, due);
   }
 }
 
-// mirrors rentCollectedForUnit(): net-of-GST rent (MG + RevShare only) collected in a month for a unit
 async function rentCollectedForUnit(pool, unitId, ym) {
   const { s, e } = monthRange(ym);
   const row = await pool.request().input('u', sql.VarChar(40), unitId).input('s', sql.Date, s).input('e', sql.Date, e).query(`
@@ -113,4 +125,4 @@ async function rentCollectedForUnit(pool, unitId, ym) {
   return Number(row.recordset[0].total) || 0;
 }
 
-module.exports = { mgAmount, genLeaseInvoices, syncRevShare, rentCollectedForUnit, getLease, getUnit };
+module.exports = { mgAmount, gstSplit, genLeaseInvoices, syncRevShare, rentCollectedForUnit, getLease, getUnit };

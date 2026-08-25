@@ -39,6 +39,8 @@ app.use('/api/collections', requireModule('collections'), require('./routes/coll
 app.use('/api/investor-units', requireModule('investors'), require('./routes/investors'));
 app.use('/api/disbursement', requireModule('disbursement'), require('./routes/disbursement'));
 app.use('/api/reports', requireModule('reports'), require('./routes/reports'));
+// Alerts available to any authenticated user (no module gate — dashboard widget)
+app.get('/api/alerts', async (req, res) => { require('./routes/reports').handle ? require('./routes/reports').handle(req, res) : res.json({}); });
 
 // deletion approval queue (route enforces admin-only for approve/reject internally)
 app.use('/api/deletion-requests', require('./routes/deletionRequests'));

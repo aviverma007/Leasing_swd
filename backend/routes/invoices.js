@@ -1,7 +1,7 @@
 const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, monthRange, irnHex, round2 } = require('../lib/helpers');
-const { genLeaseInvoices } = require('../lib/billing');
+const { genLeaseInvoices, gstSplit } = require('../lib/billing');
 const router = express.Router();
 
 function mapInvoice(r, paid) {
@@ -13,8 +13,11 @@ function mapInvoice(r, paid) {
   else status = 'Partial';
   return {
     id: r.Id, no: r.No, type: r.Type, leaseId: r.LeaseId, brandId: r.BrandId, unitId: r.UnitId, ym: r.Ym,
-    desc: r.Descr, amount: Number(r.Amount), gstPct: Number(r.GstPct), gstAmt: Number(r.GstAmt), total,
-    dueDate: r.DueDate.toISOString().slice(0, 10), irn: r.Irn, paid: p, balance: round2(total - p), status
+    desc: r.Descr, amount: Number(r.Amount), gstPct: Number(r.GstPct), gstAmt: Number(r.GstAmt),
+    cgstAmt: Number(r.CgstAmt || 0), sgstAmt: Number(r.SgstAmt || 0), igstAmt: Number(r.IgstAmt || 0),
+    hsnCode: r.HsnCode || '997212', paymentTermsDays: r.PaymentTermsDays || 7,
+    total, dueDate: r.DueDate.toISOString().slice(0, 10), irn: r.Irn, paid: p,
+    balance: round2(total - p), status, poolGroupId: r.PoolGroupId || null
   };
 }
 
@@ -29,11 +32,81 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Auto-generate MG/RevShare/CAM/Utility invoices for a month, across all active (non-hold) leases or one lease
+/* Fetch full invoice context (for printing) — includes landlord + tenant details */
+router.get('/:id/print', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const invRow = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`
+      SELECT i.*, ISNULL(c.paid,0) AS Paid FROM ${SCHEMA}.Invoices i
+      OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
+      WHERE i.Id=@id`);
+    if (!invRow.recordset.length) return res.status(404).json({ error: 'Invoice not found' });
+    const inv = invRow.recordset[0];
+
+    const leaseRow = await pool.request().input('id', sql.VarChar(40), inv.LeaseId).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
+    const lease = leaseRow.recordset[0];
+    const unitRow = await pool.request().input('id', sql.VarChar(40), inv.UnitId).query(`SELECT * FROM ${SCHEMA}.Units WHERE Id=@id`);
+    const unit = unitRow.recordset[0];
+    const assetRow = unit ? await pool.request().input('id', sql.VarChar(40), unit.AssetId).query(`SELECT * FROM ${SCHEMA}.Assets WHERE Id=@id`) : null;
+    const asset = assetRow ? assetRow.recordset[0] : null;
+    const brandRow = await pool.request().input('id', sql.VarChar(40), inv.BrandId).query(`SELECT * FROM ${SCHEMA}.Brands WHERE Id=@id`);
+    const brand = brandRow.recordset[0];
+    const compRow = brand ? await pool.request().input('id', sql.VarChar(40), brand.CompanyId).query(`SELECT * FROM ${SCHEMA}.Companies WHERE Id=@id`) : null;
+    const company = compRow ? compRow.recordset[0] : null;
+
+    res.json({
+      invoice: mapInvoice(inv, inv.Paid),
+      landlord: asset ? {
+        name: asset.LandlordName || asset.Name, address: asset.LandlordAddress,
+        gstin: asset.Gstin, pan: asset.PanNo,
+        bank: { name: asset.BankName, branch: asset.BankBranch, acc: asset.BankAcc, ifsc: asset.BankIfsc, micr: asset.BankMicr }
+      } : null,
+      tenant: {
+        brandName: brand?.Name, companyName: company?.Name,
+        address: brand?.Address || brand?.RegularAddress,
+        gstin: company?.Gstin, pan: company?.PanNo
+      },
+      unit: unit ? { name: unit.Name, floor: unit.Floor, carpetArea: unit.CarpetArea, builtupArea: unit.BuiltupArea } : null,
+      asset: asset ? { name: asset.Name, city: asset.City } : null,
+      lease: lease ? { startDate: lease.StartDate, endDate: lease.EndDate, hsnCode: lease.HsnCode, paymentTermsDays: lease.PaymentTermsDays } : null
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* SD adjustment against an invoice */
+router.post('/:id/sd-adjust', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const { sdAdjAmt, note } = req.body;
+    if (!sdAdjAmt || Number(sdAdjAmt) <= 0) return res.status(400).json({ error: 'Enter a valid SD adjustment amount.' });
+    const invRow = await pool.request().input('id', sql.VarChar(40), req.params.id)
+      .query(`SELECT i.*, ISNULL(c.paid,0) AS Paid FROM ${SCHEMA}.Invoices i OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c WHERE i.Id=@id`);
+    const inv = invRow.recordset[0];
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    const balance = round2(Number(inv.Total) - Number(inv.Paid));
+    const adjAmt = Math.min(Number(sdAdjAmt), balance);
+    if (adjAmt <= 0) return res.status(400).json({ error: 'Invoice is already fully settled.' });
+    const id = uid();
+    const no = await nextNo(pool, sql, 'RCT');
+    await pool.request()
+      .input('id', sql.VarChar(40), id).input('no', sql.VarChar(20), no)
+      .input('invoiceId', sql.VarChar(40), req.params.id)
+      .input('collDate', sql.Date, new Date().toISOString().slice(0, 10))
+      .input('amount', sql.Decimal(18, 2), adjAmt)
+      .input('sdAdjAmt', sql.Decimal(18, 2), adjAmt)
+      .input('sdNote', sql.NVarChar(300), note || 'Security deposit adjustment')
+      .input('instrument', sql.VarChar(20), 'SD-Adjust')
+      .query(`INSERT INTO ${SCHEMA}.Collections (Id,No,InvoiceId,CollDate,Amount,SdAdjAmt,SdNote,Instrument,TdsPct,Tds)
+        VALUES (@id,@no,@invoiceId,@collDate,@amount,@sdAdjAmt,@sdNote,@instrument,0,0)`);
+    res.json({ id, no, adjAmt });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Auto-generate MG/RevShare/CAM/Utility invoices for a month */
 router.post('/generate', async (req, res) => {
   try {
     const pool = await getPool();
-    const { ym, scope } = req.body; // scope: 'all' | leaseId
+    const { ym, scope } = req.body;
     let leases;
     if (scope === 'all') {
       const r = await pool.request().query(`SELECT Id FROM ${SCHEMA}.Leases WHERE Status='Active' AND OnHold=0`);
@@ -48,7 +121,27 @@ router.post('/generate', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Ad-hoc manual invoice
+/* Pool billing — generate a single grouped invoice for multiple leases */
+router.post('/generate-pool', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const { ym, leaseIds, desc } = req.body;
+    if (!leaseIds || !leaseIds.length) return res.status(400).json({ error: 'Provide at least one lease ID.' });
+    const poolGroupId = uid();
+    let count = 0;
+    for (const leaseId of leaseIds) {
+      const n = await genLeaseInvoices(pool, leaseId, ym);
+      if (n > 0) {
+        await pool.request().input('grp', sql.VarChar(40), poolGroupId).input('lid', sql.VarChar(40), leaseId).input('ym', sql.Char(7), ym)
+          .query(`UPDATE ${SCHEMA}.Invoices SET PoolGroupId=@grp WHERE LeaseId=@lid AND Ym=@ym`);
+      }
+      count += n;
+    }
+    res.json({ count, poolGroupId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Ad-hoc manual invoice */
 router.post('/adhoc', async (req, res) => {
   try {
     const pool = await getPool();
@@ -57,7 +150,8 @@ router.post('/adhoc', async (req, res) => {
     const leaseRow = await pool.request().input('id', sql.VarChar(40), leaseId).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
     const lease = leaseRow.recordset[0];
     if (!lease) return res.status(400).json({ error: 'Lease not found' });
-    const gstAmt = round2(amount * (gstPct || 0) / 100);
+    const igst = lease.IgstApplicable === true || lease.IgstApplicable === 1;
+    const { gstAmt, cgstAmt, sgstAmt, igstAmt } = gstSplit(amount, gstPct || 0, igst);
     const total = round2(Number(amount) + gstAmt);
     const id = uid();
     const no = await nextNo(pool, sql, 'INV');
@@ -66,10 +160,12 @@ router.post('/adhoc', async (req, res) => {
       .input('id', sql.VarChar(40), id).input('no', sql.VarChar(20), no).input('type', sql.VarChar(20), 'Adhoc')
       .input('leaseId', sql.VarChar(40), leaseId).input('brandId', sql.VarChar(40), lease.BrandId).input('unitId', sql.VarChar(40), lease.UnitId)
       .input('ym', sql.Char(7), ym).input('desc', sql.NVarChar(300), desc || 'Ad-hoc charge').input('amount', sql.Decimal(18, 2), amount)
-      .input('gstPct', sql.Decimal(9, 3), gstPct || 0).input('gstAmt', sql.Decimal(18, 2), gstAmt).input('total', sql.Decimal(18, 2), total)
-      .input('due', sql.Date, due).input('irn', sql.VarChar(64), irnHex())
-      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,Total,DueDate,Irn,Status)
-        VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@total,@due,@irn,'Unpaid')`);
+      .input('gstPct', sql.Decimal(9, 3), gstPct || 0).input('gstAmt', sql.Decimal(18, 2), gstAmt)
+      .input('cgstAmt', sql.Decimal(18, 2), cgstAmt).input('sgstAmt', sql.Decimal(18, 2), sgstAmt).input('igstAmt', sql.Decimal(18, 2), igstAmt)
+      .input('total', sql.Decimal(18, 2), total).input('due', sql.Date, due).input('irn', sql.VarChar(64), irnHex())
+      .input('hsnCode', sql.VarChar(20), lease.HsnCode || '997212').input('paymentTermsDays', sql.Int, lease.PaymentTermsDays || 7)
+      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays)
+        VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays)`);
     res.json({ id, no });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

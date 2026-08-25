@@ -239,3 +239,43 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal);bo
 .inv-stab.leased.on{background:#1a7a48}
 .inv-stab.vacant.on{background:#c98a1a}
 .inv-stab.selfuse.on{background:#6b7280}
+
+/* ── Alert Panel (Dashboard) ── */
+.alert-panel{background:#fffbeb;border:1px solid #f59e0b;border-radius:10px;margin-bottom:22px;overflow:hidden}
+.alert-panel-hd{display:flex;align-items:center;gap:8px;padding:11px 16px;background:#fef3c7;border-bottom:1px solid #f59e0b;font-weight:700;font-size:13.5px;color:#92400e}
+.alert-badge{background:#ef4444;color:#fff;font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px;margin-left:auto}
+.alert-sections{padding:10px 16px 12px;display:flex;flex-direction:column;gap:10px}
+.alert-section{padding:0}
+.alert-section-title{font-size:12px;font-weight:700;margin-bottom:6px;padding:3px 0}
+.alert-section-title.warn{color:#b45309}
+.alert-section-title.danger{color:#dc2626}
+.alert-section-title.info{color:#1d4ed8}
+.alert-row{font-size:12.5px;padding:3px 0;border-bottom:1px dashed var(--line,#e5e7eb)}
+.alert-row:last-child{border-bottom:none}
+
+/* ── Full Invoice Print Layout ── */
+.inv-print{font-size:13px;color:var(--ink)}
+.inv-header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:2px solid var(--teal,#0d9488);margin-bottom:14px}
+.inv-header h3{margin:0 0 4px;font-size:19px;letter-spacing:.5px;color:var(--teal,#0d9488);font-weight:800}
+.inv-einvoice-note{font-size:10.5px;color:var(--muted);max-width:340px;line-height:1.4;margin-top:4px}
+.inv-no{font-size:18px;font-weight:700;text-align:right;font-family:var(--mono)}
+.inv-parties{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;padding:12px;background:var(--surface2,#f9fafb);border-radius:8px}
+.inv-party-label{font-size:10px;font-weight:700;letter-spacing:.6px;color:var(--muted);text-transform:uppercase;margin-bottom:4px}
+.inv-addr{max-width:220px;line-height:1.4;white-space:pre-wrap}
+.inv-meta-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;font-size:12.5px}
+.inv-meta-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.inv-tax-total{display:flex;justify-content:space-between;align-items:flex-start;margin-top:14px;gap:16px}
+.inv-notes{flex:1;font-size:12px;color:var(--ink);line-height:1.6}
+.inv-note{padding:4px 0;border-bottom:1px dashed var(--line)}
+.inv-bank{margin-top:10px;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:12px;line-height:1.6}
+.inv-footer-note{margin-top:14px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);text-align:center;font-style:italic}
+table.ledger td.r{text-align:right;font-family:var(--mono);padding-left:24px}
+table.ledger tr.tot td{font-weight:700;border-top:1px solid var(--line);padding-top:5px}
+
+/* ── Print media for invoices ── */
+@media print{
+  .rail,.topbar,.modal-overlay>.modal-card>.modal-footer,.btn{display:none!important}
+  .modal-overlay{position:static!important;background:none!important}
+  .modal-card{box-shadow:none!important;border:none!important;max-width:100%!important;max-height:100%!important;overflow:visible!important}
+  .inv-print{font-size:12px}
+}

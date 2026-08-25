@@ -36,15 +36,31 @@ export const canApprove = (role) => ['Finance Head', 'Center/Portfolio Head'].in
 export const MASTER_SCHEMA = {
   companies: {
     sing: 'Company',
-    fields: [{ k: 'name', l: 'Company name', req: 1, ph: 'Vertex Retail Ventures Pvt Ltd' }],
-    head: ['Code', 'Company'],
-    cols: (r) => [r.code, r.name]
+    fields: [
+      { k: 'name', l: 'Company name', req: 1, ph: 'Vertex Retail Ventures Pvt Ltd' },
+      { k: 'panNo', l: 'PAN', ph: 'AABCT1332L' },
+      { k: 'gstin', l: 'GSTIN', ph: '07AABCT1332L1ZS' }
+    ],
+    head: ['Code', 'Company', 'PAN', 'GSTIN'],
+    cols: (r) => [r.code, r.name, r.panNo || '—', r.gstin || '—']
   },
   assets: {
     sing: 'Project',
-    fields: [{ k: 'name', l: 'Asset name', req: 1, ph: 'Meridian Mall' }, { k: 'city', l: 'City', ph: 'Mumbai' }],
-    head: ['Code', 'Project', 'City'],
-    cols: (r) => [r.code, r.name, r.city || '—']
+    fields: [
+      { k: 'name', l: 'Asset name', req: 1, ph: 'Gems-2 Commercial, Sec-89' },
+      { k: 'city', l: 'City', ph: 'Gurugram' },
+      { k: 'landlordName', l: 'Landlord / Developer name', ph: 'Smart World Developers Pvt Ltd' },
+      { k: 'landlordAddress', l: 'Landlord registered address', type: 'textarea', ph: 'Plot No.xxx, Sec-89, Gurugram, Haryana 122004' },
+      { k: 'gstin', l: 'Landlord GSTIN', ph: '06AABCS1234M1ZX' },
+      { k: 'panNo', l: 'Landlord PAN', ph: 'AABCS1234M' },
+      { k: 'bankName', l: 'Bank name', ph: 'HDFC Bank' },
+      { k: 'bankBranch', l: 'Branch', ph: 'Sector-14, Gurugram' },
+      { k: 'bankAcc', l: 'Account number', ph: '50100XXXXXXXXXX' },
+      { k: 'bankIfsc', l: 'IFSC code', ph: 'HDFC0001234' },
+      { k: 'bankMicr', l: 'MICR code', ph: '110240029' }
+    ],
+    head: ['Code', 'Project', 'City', 'GSTIN'],
+    cols: (r) => [r.code, r.name, r.city || '—', r.gstin || '—']
   },
   blocks: {
     sing: 'Block',
@@ -71,6 +87,8 @@ export const MASTER_SCHEMA = {
     fields: [
       { k: 'name', l: 'Brand name', req: 1, ph: 'Brewhouse Cafe' },
       { k: 'companyId', l: 'Company', req: 1, ref: 'companies' },
+      { k: 'panNo', l: 'Brand PAN', ph: 'AABCB1234L' },
+      { k: 'gstin', l: 'Brand GSTIN', ph: '06AABCB1234L1ZX' },
       { k: 'category', l: 'Brand category', type: 'select', opts: CATEGORIES },
       { k: 'brandType', l: 'Brand type', type: 'select', opts: ['', 'F&B', 'Salon', 'Health', 'Bank', 'Pharmacy', 'Laundry', 'Departmental store', 'Other'] },
       { k: 'unitRef', l: 'Unit ref (from deal sheet)', ph: 'e.g. G-06 & G-07' },
@@ -145,6 +163,10 @@ export const NAV = [
   { v: 'disbursement', label: 'Process Disbursement' },
   { grp: 'Reports' },
   { v: 'reports', label: 'Reports & SAP' },
+  { v: 'gstrecon', label: 'GST Reconciliation' },
+  { v: 'tdsrecon', label: 'TDS Reconciliation' },
+  { v: 'agreementrecon', label: 'Agreement Recon' },
+  { v: 'sdrecon', label: 'SD Reconciliation' },
   { grp: 'Admin' },
   { v: 'deletions', label: 'Pending Deletions' }
 ];
@@ -167,5 +189,9 @@ export const PAGES = {
   investoraccounts: { t: 'Investor Accounts', s: 'Rent collected, distributed and pending per investor' },
   disbursement: { t: 'Process Rent Disbursement', s: 'Monthly disbursement with deductions, TDS, hold & payment' },
   reports: { t: 'Reports & SAP Entry Book', s: 'Disbursement, hold, SD and GL export' },
+  gstrecon: { t: 'GST Reconciliation', s: 'CGST / SGST / IGST invoiced vs collected, month-wise' },
+  tdsrecon: { t: 'TDS Reconciliation', s: 'TDS deducted on collections — for Form 26Q / 27Q' },
+  agreementrecon: { t: 'Agreement Reconciliation', s: 'Lease terms vs actual billing per brand and unit' },
+  sdrecon: { t: 'Security Deposit Reconciliation', s: 'SD agreed, collected, adjusted and balance per lease' },
   deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' }
 };
