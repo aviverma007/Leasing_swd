@@ -714,6 +714,7 @@ function UnitDetailSlide({ unit, db, onClose }) {
 function CloseIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>; }
 
 function Dashboard({ db }) {
+  const [showAllDue, setShowAllDue] = React.useState(false);
   const totalUnits = db.units.length;
   const leasedUnits = db.units.filter((u) => u.status === 'Leased').length;
   const vacantUnits = db.units.filter((u) => u.status === 'Vacant').length;
@@ -755,13 +756,19 @@ function Dashboard({ db }) {
             {billingDue.length > 0 && (
               <div className="alert-section">
                 <div className="alert-section-title warn">⏰ Bills not yet raised ({currYm})</div>
-                {billingDue.slice(0, 5).map((l) => (
-                  <div className="alert-row" key={l.id}>
-                    <span className="strong">{nameOf(db.brands, l.brandId)}</span>
-                    <span className="sub"> · {nameOf(db.units, l.unitId)} · {l.rentalType}</span>
-                  </div>
-                ))}
-                {billingDue.length > 5 && <div className="sub" style={{ padding: '2px 12px' }}>+{billingDue.length - 5} more…</div>}
+                <div className={'alert-list' + (showAllDue ? ' expanded' : '')}>
+                  {(showAllDue ? billingDue : billingDue.slice(0, 5)).map((l) => (
+                    <div className="alert-row" key={l.id}>
+                      <span className="strong">{nameOf(db.brands, l.brandId)}</span>
+                      <span className="sub"> · {nameOf(db.units, l.unitId)} · {l.rentalType}</span>
+                    </div>
+                  ))}
+                </div>
+                {billingDue.length > 5 && (
+                  <button className="alert-more" onClick={() => setShowAllDue(!showAllDue)}>
+                    {showAllDue ? '▲ Show less' : `▼ Show all ${billingDue.length}`}
+                  </button>
+                )}
               </div>
             )}
             {overdueInv.length > 0 && (

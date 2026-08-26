@@ -279,3 +279,8 @@ table.ledger tr.tot td{font-weight:700;border-top:1px solid var(--line);padding-
   .modal-card{box-shadow:none!important;border:none!important;max-width:100%!important;max-height:100%!important;overflow:visible!important}
   .inv-print{font-size:12px}
 }
+
+/* alert list expand + scroll */
+.alert-list.expanded{max-height:320px;overflow-y:auto;padding-right:6px}
+.alert-more{margin-top:6px;background:none;border:none;color:#b45309;font-size:12px;font-weight:700;cursor:pointer;padding:4px 0}
+.alert-more:hover{text-decoration:underline}
