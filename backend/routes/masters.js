@@ -13,9 +13,9 @@ const ENTITIES = {
   },
   assets: {
     table: 'Assets', prefix: 'AST',
-    cols: ['Name', 'City', 'LandlordName', 'LandlordAddress', 'Gstin', 'PanNo', 'BankName', 'BankBranch', 'BankAcc', 'BankIfsc', 'BankMicr'],
+    cols: ['Name', 'City', 'ReraNo', 'OcStatus', 'LandlordName', 'LandlordAddress', 'Gstin', 'PanNo', 'BankName', 'BankBranch', 'BankAcc', 'BankIfsc', 'BankMicr'],
     map: r => ({
-      id: r.Id, code: r.Code, name: r.Name, city: r.City,
+      id: r.Id, code: r.Code, name: r.Name, city: r.City, reraNo: r.ReraNo, ocStatus: r.OcStatus,
       landlordName: r.LandlordName, landlordAddress: r.LandlordAddress,
       gstin: r.Gstin, panNo: r.PanNo,
       bankName: r.BankName, bankBranch: r.BankBranch, bankAcc: r.BankAcc, bankIfsc: r.BankIfsc, bankMicr: r.BankMicr
@@ -28,8 +28,8 @@ const ENTITIES = {
   },
   units: {
     table: 'Units', prefix: 'UNT',
-    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status', 'Owner'],
-    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status, owner: r.Owner })
+    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status', 'Owner', 'UnitType', 'Plc', 'CoveredArea'],
+    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status, owner: r.Owner, unitType: r.UnitType, plc: r.Plc, coveredArea: r.CoveredArea })
   },
   brands: {
     table: 'Brands', prefix: 'BRD',
@@ -55,7 +55,7 @@ const ENTITIES = {
 
 // Columns that must be bound as numbers (SQL Server rejects strings for these)
 const INT_COLS = new Set(['TotalFloors', 'Floor', ...BRAND_FIELDS.filter(f => f[2] === 'int').map(f => f[1])]);
-const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea', ...BRAND_FIELDS.filter(f => f[2] === 'dec').map(f => f[1])]);
+const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea', 'CoveredArea', ...BRAND_FIELDS.filter(f => f[2] === 'dec').map(f => f[1])]);
 const DATE_COLS = new Set(BRAND_FIELDS.filter(f => f[2] === 'date').map(f => f[1]));
 // DB column -> body key for the extended brand fields
 const BRAND_KEYMAP = Object.fromEntries(BRAND_FIELDS.map(f => [f[1], f[0]]));
@@ -112,7 +112,7 @@ function router(entityKey) {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
-        PanNo: 'panNo', Gstin: 'gstin',
+        PanNo: 'panNo', Gstin: 'gstin', UnitType: 'unitType', Plc: 'plc', CoveredArea: 'coveredArea', ReraNo: 'reraNo', OcStatus: 'ocStatus',
         LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
         BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',
@@ -155,7 +155,7 @@ function router(entityKey) {
         Name: 'name', City: 'city', AssetId: 'assetId', BlockId: 'blockId', TotalFloors: 'totalFloors',
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
-        PanNo: 'panNo', Gstin: 'gstin',
+        PanNo: 'panNo', Gstin: 'gstin', UnitType: 'unitType', Plc: 'plc', CoveredArea: 'coveredArea', ReraNo: 'reraNo', OcStatus: 'ocStatus',
         LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
         BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',

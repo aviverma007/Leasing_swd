@@ -49,6 +49,8 @@ export const MASTER_SCHEMA = {
     fields: [
       { k: 'name', l: 'Asset name', req: 1, ph: 'Gems-2 Commercial, Sec-89' },
       { k: 'city', l: 'City', ph: 'Gurugram' },
+      { k: 'reraNo', l: 'RERA registration no', ph: 'RERA for GEMS-2 - 85 of 2024' },
+      { k: 'ocStatus', l: 'OC status', type: 'select', opts: ['', 'OC Received', 'OC Applied', 'OC Pending'] },
       { k: 'landlordName', l: 'Landlord / Developer name', ph: 'Smart World Developers Pvt Ltd' },
       { k: 'landlordAddress', l: 'Landlord registered address', type: 'textarea', ph: 'Plot No.xxx, Sec-89, Gurugram, Haryana 122004' },
       { k: 'gstin', l: 'Landlord GSTIN', ph: '06AABCS1234M1ZX' },
@@ -75,12 +77,15 @@ export const MASTER_SCHEMA = {
       { k: 'assetId', l: 'Project', req: 1, ref: 'assets' },
       { k: 'blockId', l: 'Block', req: 1, ref: 'blocks' },
       { k: 'floor', l: 'Floor', type: 'number', ph: '1' },
+      { k: 'unitType', l: 'Unit type', type: 'select', opts: ['', 'SHOP', 'KIOSK', 'CAFÉ', 'ANCHOR', 'OFFICE', 'OTHER'] },
+      { k: 'plc', l: 'PLC (location/facing)', ph: 'Front Facing / Corner' },
       { k: 'carpetArea', l: 'Carpet area (sq ft)', type: 'number', ph: '2200' },
-      { k: 'builtupArea', l: 'Built-up area (sq ft)', type: 'number', ph: '2600' },
+      { k: 'coveredArea', l: 'Covered area (sq ft)', type: 'number', ph: '2400' },
+      { k: 'builtupArea', l: 'Super/Built-up area (sq ft)', type: 'number', ph: '2600' },
       { k: 'owner', l: 'Owner (customer)', ph: 'Unit owner name' }
     ],
-    head: ['Code', 'Unit', 'Project', 'Owner', 'Carpet', 'Built-up', 'Status'],
-    cols: (r, db) => [r.code, r.name, nameOf(db.assets, r.assetId), r.owner || '—', (+r.carpetArea || 0).toLocaleString('en-IN'), (+r.builtupArea || 0).toLocaleString('en-IN'), r.status]
+    head: ['Code', 'Unit', 'Type', 'PLC', 'Carpet', 'Covered', 'Super', 'Status'],
+    cols: (r, db) => [r.code, r.name, r.unitType || '—', r.plc || '—', (+r.carpetArea || 0).toLocaleString('en-IN'), (+r.coveredArea || 0).toLocaleString('en-IN'), (+r.builtupArea || 0).toLocaleString('en-IN'), r.status]
   },
   brands: {
     sing: 'Brand',
