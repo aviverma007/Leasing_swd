@@ -129,7 +129,24 @@ router.post('/generate', async (req, res) => {
     }
     console.log('[generate]', JSON.stringify(debug));
     const errors = debug.results.filter(r => r.error);
-    res.json({ count, scanned: debug.scanned, errors: errors.slice(0, 3) });
+    let reason = null;
+    if (count === 0 && scope !== 'all' && leases.length === 1 && !errors.length) {
+      // Explain exactly why this single lease produced nothing
+      const lr = await pool.request().input('id', sql.VarChar(40), leases[0]).input('ym', sql.Char(7), ym)
+        .query(`SELECT l.Code, l.RentalType, l.Mg, l.MgBasis, l.Cam, l.Utility, u.BuiltupArea,
+          (SELECT COUNT(*) FROM ${SCHEMA}.Invoices i WHERE i.LeaseId=l.Id AND i.Ym=@ym AND i.Type='MG') AS MgBilled
+          FROM ${SCHEMA}.Leases l JOIN ${SCHEMA}.Units u ON u.Id=l.UnitId WHERE l.Id=@id`)
+        .catch(() => null);
+      const row = lr && lr.recordset[0];
+      if (row) {
+        const computedMg = row.MgBasis === 'PerSqFt' ? Number(row.Mg) * Number(row.BuiltupArea || 0) : Number(row.Mg);
+        if (row.MgBilled > 0) reason = `${row.Code}: ${ym} is already billed for this lease.`;
+        else if (['MG', 'MGvsRS'].includes(row.RentalType) && computedMg <= 0) reason = `${row.Code}: MG rate is 0 — set the MG value on the lease first.`;
+        else if (!['MG', 'MGvsRS'].includes(row.RentalType)) reason = `${row.Code}: ${row.RentalType} lease — bills only after sales are entered for ${ym}.`;
+        else reason = `${row.Code}: nothing billable for ${ym}.`;
+      }
+    }
+    res.json({ count, scanned: debug.scanned, errors: errors.slice(0, 3), reason });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

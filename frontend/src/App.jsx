@@ -1371,6 +1371,7 @@ function GenerateInvoiceModal({ db, onClose, refresh, notify }) {
         await refresh(['invoices']);
         if (res.count) notify(`${res.count} invoice(s) generated for ${ymLabel(ym)}.`);
         else if (res.errors && res.errors.length) notify(`0 generated — ${res.errors[0].error}`, true);
+        else if (res.reason) notify(res.reason, true);
         else notify(`No new invoices (scanned ${res.scanned ?? '?'} leases — already generated or nothing billable).`);
       }
       onClose();
