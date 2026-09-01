@@ -1367,9 +1367,11 @@ function GenerateInvoiceModal({ db, onClose, refresh, notify }) {
         await refresh(['invoices']);
         notify('Ad-hoc invoice booked.');
       } else {
-        const { count } = await api.invoices.generate(ym, scope);
+        const res = await api.invoices.generate(ym, scope);
         await refresh(['invoices']);
-        notify(count ? `${count} invoice(s) generated for ${ymLabel(ym)}.` : 'No new invoices (already generated or on hold).');
+        if (res.count) notify(`${res.count} invoice(s) generated for ${ymLabel(ym)}.`);
+        else if (res.errors && res.errors.length) notify(`0 generated — ${res.errors[0].error}`, true);
+        else notify(`No new invoices (scanned ${res.scanned ?? '?'} leases — already generated or nothing billable).`);
       }
       onClose();
     } catch (e) { notify(e.message, true); }

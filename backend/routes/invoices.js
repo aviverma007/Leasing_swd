@@ -110,15 +110,26 @@ router.post('/generate', async (req, res) => {
     const { ym, scope } = req.body;
     let leases;
     if (scope === 'all') {
-      const r = await pool.request().query(`SELECT Id FROM ${SCHEMA}.Leases WHERE Status='Active' AND OnHold=0`);
+      const r = await pool.request().query(`SELECT Id FROM ${SCHEMA}.Leases WHERE UPPER(LTRIM(RTRIM(Status)))='ACTIVE' AND ISNULL(OnHold,0)=0`);
       leases = r.recordset.map(x => x.Id);
     } else {
-      const r = await pool.request().input('id', sql.VarChar(40), scope).query(`SELECT Id FROM ${SCHEMA}.Leases WHERE Id=@id AND OnHold=0`);
+      const r = await pool.request().input('id', sql.VarChar(40), scope).query(`SELECT Id FROM ${SCHEMA}.Leases WHERE Id=@id AND ISNULL(OnHold,0)=0`);
       leases = r.recordset.map(x => x.Id);
     }
     let count = 0;
-    for (const leaseId of leases) count += await genLeaseInvoices(pool, leaseId, ym);
-    res.json({ count });
+    const debug = { scanned: leases.length, ym, results: [] };
+    for (const leaseId of leases) {
+      try {
+        const n = await genLeaseInvoices(pool, leaseId, ym);
+        count += n;
+        debug.results.push({ leaseId, generated: n });
+      } catch (le) {
+        debug.results.push({ leaseId, error: le.message });
+      }
+    }
+    console.log('[generate]', JSON.stringify(debug));
+    const errors = debug.results.filter(r => r.error);
+    res.json({ count, scanned: debug.scanned, errors: errors.slice(0, 3) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
