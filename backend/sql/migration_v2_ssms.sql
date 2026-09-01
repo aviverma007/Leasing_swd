@@ -126,3 +126,15 @@ PRINT 'e-Invoice fields added.';
 /* ── Per-lease alert opt-in ── */
 IF COL_LENGTH('leasing.Leases','AlertsEnabled') IS NULL ALTER TABLE leasing.Leases ADD AlertsEnabled BIT NOT NULL DEFAULT 1;
 GO
+
+/* ── Per-lease invoice party overrides (SPV-wise invoicing) ── */
+IF COL_LENGTH('leasing.Leases','LessorName') IS NULL ALTER TABLE leasing.Leases ADD LessorName NVARCHAR(200) NULL;
+IF COL_LENGTH('leasing.Leases','LessorAddress') IS NULL ALTER TABLE leasing.Leases ADD LessorAddress NVARCHAR(500) NULL;
+IF COL_LENGTH('leasing.Leases','LessorGstin') IS NULL ALTER TABLE leasing.Leases ADD LessorGstin NVARCHAR(20) NULL;
+IF COL_LENGTH('leasing.Leases','LessorPan') IS NULL ALTER TABLE leasing.Leases ADD LessorPan NVARCHAR(20) NULL;
+IF COL_LENGTH('leasing.Leases','LesseeName') IS NULL ALTER TABLE leasing.Leases ADD LesseeName NVARCHAR(200) NULL;
+IF COL_LENGTH('leasing.Leases','LesseeAddress') IS NULL ALTER TABLE leasing.Leases ADD LesseeAddress NVARCHAR(500) NULL;
+IF COL_LENGTH('leasing.Leases','LesseeGstin') IS NULL ALTER TABLE leasing.Leases ADD LesseeGstin NVARCHAR(20) NULL;
+IF COL_LENGTH('leasing.Leases','LesseePan') IS NULL ALTER TABLE leasing.Leases ADD LesseePan NVARCHAR(20) NULL;
+GO
+PRINT 'Lease party-override columns added.';

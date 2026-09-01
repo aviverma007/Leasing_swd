@@ -57,15 +57,19 @@ router.get('/:id/print', async (req, res) => {
 
     res.json({
       invoice: mapInvoice(inv, inv.Paid),
-      landlord: asset ? {
-        name: asset.LandlordName || asset.Name, address: asset.LandlordAddress,
-        gstin: asset.Gstin, pan: asset.PanNo,
-        bank: { name: asset.BankName, branch: asset.BankBranch, acc: asset.BankAcc, ifsc: asset.BankIfsc, micr: asset.BankMicr }
-      } : null,
+      landlord: {
+        name: lease?.LessorName || asset?.LandlordName || asset?.Name,
+        address: lease?.LessorAddress || asset?.LandlordAddress,
+        gstin: lease?.LessorGstin || asset?.Gstin,
+        pan: lease?.LessorPan || asset?.PanNo,
+        bank: asset ? { name: asset.BankName, branch: asset.BankBranch, acc: asset.BankAcc, ifsc: asset.BankIfsc, micr: asset.BankMicr } : {}
+      },
       tenant: {
-        brandName: brand?.Name, companyName: company?.Name,
-        address: brand?.Address || brand?.RegularAddress,
-        gstin: company?.Gstin, pan: company?.PanNo
+        brandName: brand?.Name,
+        companyName: lease?.LesseeName || company?.Name,
+        address: lease?.LesseeAddress || brand?.Address || brand?.RegularAddress,
+        gstin: lease?.LesseeGstin || company?.Gstin,
+        pan: lease?.LesseePan || company?.PanNo
       },
       unit: unit ? { name: unit.Name, floor: unit.Floor, carpetArea: unit.CarpetArea, builtupArea: unit.BuiltupArea } : null,
       asset: asset ? { name: asset.Name, city: asset.City } : null,

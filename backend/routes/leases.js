@@ -32,6 +32,7 @@ router.post('/', async (req, res) => {
   try {
     const pool = await getPool();
     const b = req.body;
+    if (typeof b.igstApplicable === 'string') b.igstApplicable = b.igstApplicable === 'Yes' ? 1 : 0;
     const unitRow = await pool.request().input('id', sql.VarChar(40), b.unitId).query(`SELECT * FROM ${SCHEMA}.Units WHERE Id=@id`);
     const unit = unitRow.recordset[0];
     if (!unit) return res.status(400).json({ error: 'Unit not found' });
@@ -84,6 +85,7 @@ router.put('/:id', async (req, res) => {
   try {
     const pool = await getPool();
     const b = req.body;
+    if (typeof b.igstApplicable === 'string') b.igstApplicable = b.igstApplicable === 'Yes' ? 1 : 0;
     const request = pool.request();
     request.input('id', sql.VarChar(40), req.params.id);
     request.input('brandId', sql.VarChar(40), b.brandId);

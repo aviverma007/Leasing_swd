@@ -76,6 +76,19 @@ const LEASE_FIELDS = [
   ['dealWith', 'DealWith', 'str', 150],
   ['billingRemarks', 'BillingRemarks', 'str', 1000],
   ['category', 'Category', 'str', 80],
+  // Billing config (persists the Billing Config tab)
+  ['hsnCode', 'HsnCode', 'str', 20],
+  ['paymentTermsDays', 'PaymentTermsDays', 'int'],
+  ['igstApplicable', 'IgstApplicable', 'int'],
+  // Invoice party details — per-lease lessor/lessee overrides (SPV-wise invoicing)
+  ['lessorName', 'LessorName', 'str', 200],
+  ['lessorAddress', 'LessorAddress', 'str', 500],
+  ['lessorGstin', 'LessorGstin', 'str', 20],
+  ['lessorPan', 'LessorPan', 'str', 20],
+  ['lesseeName', 'LesseeName', 'str', 200],
+  ['lesseeAddress', 'LesseeAddress', 'str', 500],
+  ['lesseeGstin', 'LesseeGstin', 'str', 20],
+  ['lesseePan', 'LesseePan', 'str', 20],
   // NFA (Note for Approval) fields
   ['nfaClientName', 'NfaClientName', 'str', 200],
   ['nfaOpportunityId', 'NfaOpportunityId', 'str', 80],

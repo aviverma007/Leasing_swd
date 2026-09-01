@@ -1028,6 +1028,16 @@ const LEASE_SECTIONS = [
     ['paymentTermsDays', 'Payment terms (days from invoice)', 'num'],
     ['igstApplicable', 'IGST applicable (interstate)', ['', 'Yes', 'No']]
   ]],
+  ['Invoice Party Details', [
+    ['lessorName', 'Lessor (SPV) name — appears on invoice', 'text'],
+    ['lessorAddress', 'Lessor registered address', 'area'],
+    ['lessorGstin', 'Lessor GSTIN', 'text'],
+    ['lessorPan', 'Lessor PAN', 'text'],
+    ['lesseeName', 'Lessee legal name', 'text'],
+    ['lesseeAddress', 'Lessee address', 'area'],
+    ['lesseeGstin', 'Lessee GSTIN (or "Unregistered")', 'text'],
+    ['lesseePan', 'Lessee PAN', 'text']
+  ]],
   ['Remarks', [
     ['standardRemarks', 'Standard remarks', 'area'],
     ['detailedRemarks', 'Detailed remarks', 'area'],
@@ -1105,6 +1115,8 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
     };
     // seed rich fields from the existing lease (or blank)
     for (const k of ALL_LEASE_KEYS) base[k] = existing && existing[k] != null ? existing[k] : '';
+    if (base.igstApplicable === 1 || base.igstApplicable === true) base.igstApplicable = 'Yes';
+    else if (base.igstApplicable === 0 || base.igstApplicable === false) base.igstApplicable = '';
     return base;
   });
   const set = (k, v) => setForm((s) => ({ ...s, [k]: v }));
@@ -1422,9 +1434,28 @@ function GenerateInvoiceModal({ db, onClose, refresh, notify }) {
   );
 }
 
+function inWords(num) {
+  const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = (n) => n < 20 ? a[n] : b[Math.floor(n / 10)] + (n % 10 ? ' ' + a[n % 10] : '');
+  const three = (n) => (n > 99 ? a[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' : '') : '') + (n % 100 ? two(n % 100) : '');
+  num = Math.round(Number(num) || 0);
+  if (num === 0) return 'Zero';
+  let out = '';
+  const crore = Math.floor(num / 10000000); num %= 10000000;
+  const lakh = Math.floor(num / 100000); num %= 100000;
+  const thousand = Math.floor(num / 1000); num %= 1000;
+  if (crore) out += three(crore) + ' Crore ';
+  if (lakh) out += three(lakh) + ' Lakh ';
+  if (thousand) out += three(thousand) + ' Thousand ';
+  if (num) out += three(num);
+  return out.trim();
+}
+
 function ViewInvoiceModal({ id, db, onClose, setModal }) {
   const [printData, setPrintData] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
+  const [fmt, setFmt] = React.useState('tax'); // 'tax' | 'einv'
   const i = findById(db.invoices, id);
 
   useEffect(() => {
@@ -1464,8 +1495,16 @@ function ViewInvoiceModal({ id, db, onClose, setModal }) {
 
   return (
     <Modal title={`Tax Invoice — ${i.no}`} onClose={onClose} wide
-      footer={<><button className="btn btn-ghost" onClick={printInvoice}>🖨 Print</button><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-teal btn-sm" onClick={() => { onClose(); setModal({ type: 'sdAdjust', id }); }}>SD Adjust</button></>}>
-      {loading ? <div className="empty"><p>Loading invoice…</p></div> : (
+      footer={<>
+        <div className="fmt-toggle">
+          <button className={fmt === 'tax' ? 'on' : ''} onClick={() => setFmt('tax')}>Tax Invoice</button>
+          <button className={fmt === 'einv' ? 'on' : ''} onClick={() => setFmt('einv')}>e-Invoice</button>
+        </div>
+        <button className="btn btn-ghost" onClick={printInvoice}>🖨 Print</button><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-teal btn-sm" onClick={() => { onClose(); setModal({ type: 'sdAdjust', id }); }}>SD Adjust</button></>}>
+      {loading ? <div className="empty"><p>Loading invoice…</p></div> : fmt === 'tax' ? (
+        <TaxInvoiceView i={i} inv={inv} landlord={landlord} tenant={tenant} unit={unit} asset={asset}
+          igstMode={igstMode} gstPct={gstPct} hsnCode={hsnCode} payDays={payDays} balance={balance} />
+      ) : (
         <div className="einv inv-print">
           {/* Top: supplier GSTIN + name, QR-style IRN box */}
           <div className="einv-top">
@@ -1599,6 +1638,100 @@ function ViewInvoiceModal({ id, db, onClose, setModal }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+
+/* Classic company Tax Invoice — mirrors Suposhaa/Adhikaansh PDF format */
+function TaxInvoiceView({ i, inv, landlord, tenant, unit, asset, igstMode, gstPct, hsnCode, payDays, balance }) {
+  const halfPct = (gstPct / 2).toFixed(0);
+  const ratePsf = unit && Number(unit.builtupArea) > 0 ? (Number(inv.amount) / Number(unit.builtupArea)) : null;
+  const gstTotal = Number(inv.gstAmt || 0);
+  return (
+    <div className="taxinv inv-print">
+      <div className="taxinv-head">
+        <div className="taxinv-co">{(landlord.name || 'LESSOR NAME NOT SET').toUpperCase()}</div>
+        {landlord.address && <div className="taxinv-regd">Regd. Office: {landlord.address}</div>}
+      </div>
+      <div className="taxinv-title">Tax Invoice</div>
+      <div className="taxinv-panrow">
+        <span><b>PAN No.</b> {landlord.pan || '—'}</span>
+        <span><b>GSTN :</b> {landlord.gstin || '—'}</span>
+      </div>
+      <table className="taxinv-tbl">
+        <tbody>
+          <tr>
+            <td style={{ width: '18%' }}><b>Property No.</b></td>
+            <td style={{ width: '32%' }}>{unit?.name} · {asset?.name}</td>
+            <td style={{ width: '18%' }}><b>Lessor Name and Address</b></td>
+            <td style={{ width: '32%' }}>{landlord.name}{landlord.address ? <div className="sub">{landlord.address}</div> : null}</td>
+          </tr>
+          <tr>
+            <td><b>GSTN :</b></td>
+            <td colSpan={3}>{tenant.gstin || 'Unregistered'}</td>
+          </tr>
+          <tr>
+            <td><b>Name and Address of Lessee</b></td>
+            <td colSpan={3}>{tenant.companyName || tenant.brandName}{tenant.address ? <div className="sub">{tenant.address}</div> : null}</td>
+          </tr>
+        </tbody>
+      </table>
+      <table className="taxinv-tbl">
+        <tbody>
+          <tr>
+            <td style={{ width: '50%' }}>
+              <b>Premises Detail</b>
+              <div>{asset?.name}</div>
+              <div className="sub">{asset?.city ? `Sector-89, ${asset.city} -Haryana` : ''}</div>
+            </td>
+            <td>
+              <div><b>Bill Number</b> &nbsp; {i.no}</div>
+              <div><b>Bill Date</b> &nbsp; {fmtDate(inv.ackDate ? inv.ackDate.slice(0, 10) : i.dueDate)}</div>
+              <div><b>Bill Due Date</b> &nbsp; {fmtDate(i.dueDate)}</div>
+              <div><b>Super area</b> &nbsp; {unit?.builtupArea ? Number(unit.builtupArea).toLocaleString('en-IN') + ' Sq.Ft.' : '—'}</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <table className="taxinv-tbl taxinv-items">
+        <thead>
+          <tr><th style={{ width: '8%' }}>S. No.</th><th>Description</th><th style={{ width: '14%' }}>Lease Rent Per Sq. ft.</th><th style={{ width: '12%' }}>SAC Code</th><th style={{ width: '15%' }} className="num">Amount(Rs.)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td></td>
+            <td>{i.desc || i.type}</td>
+            <td className="num">{ratePsf ? ratePsf.toFixed(2) : '—'}</td>
+            <td>{hsnCode}</td>
+            <td className="num">{Number(inv.amount).toLocaleString('en-IN')}</td>
+          </tr>
+          <tr><td><b>A.</b></td><td colSpan={3}><b>Sub Total –A</b></td><td className="num"><b>{Number(inv.amount).toLocaleString('en-IN')}</b></td></tr>
+          {igstMode ? (
+            <tr><td></td><td colSpan={3}>Add: IGST @{gstPct}% on above</td><td className="num">{Number(inv.igstAmt || 0).toLocaleString('en-IN')}</td></tr>
+          ) : (
+            <>
+              <tr><td></td><td colSpan={3}>Add: CGST @{halfPct}% on above</td><td className="num">{Number(inv.cgstAmt || 0).toLocaleString('en-IN')}</td></tr>
+              <tr><td></td><td colSpan={3}>Add: SGST @{halfPct}% on above</td><td className="num">{Number(inv.sgstAmt || 0).toLocaleString('en-IN')}</td></tr>
+            </>
+          )}
+          <tr><td><b>B.</b></td><td colSpan={3}><b>Sub Total-B</b></td><td className="num"><b>{gstTotal.toLocaleString('en-IN')}</b></td></tr>
+          <tr className="taxinv-total"><td></td><td colSpan={3}><b>Total (A+B)</b></td><td className="num"><b>{Number(inv.total).toLocaleString('en-IN')}</b></td></tr>
+        </tbody>
+      </table>
+      <div className="taxinv-words">Rupees {inWords(inv.total)} Only</div>
+      <div className="taxinv-notes">
+        <b>Notes :</b>
+        <div>1. All Payments shall be made by the user through A/c payee cheque /demand draft only in favour of <b>{landlord.name}</b> payable at Gurugram &amp; shall be subject to realization. No Cash payment shall be accepted. Please mention property no. on reverse of your cheque/DD/Pay Order.</div>
+        {landlord.bank?.acc && <div>2. Bank Detail for RTGS/NEFT: {landlord.bank.name}, Current A/c No. {landlord.bank.acc}{landlord.bank.ifsc ? `, IFSC Code: ${landlord.bank.ifsc}` : ''}</div>}
+        <div>{landlord.bank?.acc ? '3' : '2'}. In case the user fails to pay the bill on or before the due date indicated on the Bill ({payDays}-day terms), interest @18% p.a. will be levied on the outstanding amount for the number of days defaulted from the bill date.</div>
+        <div>{landlord.bank?.acc ? '4' : '3'}. TDS as applicable. Reverse Charge is not applicable.</div>
+      </div>
+      <div className="taxinv-sign">
+        <div>For {landlord.name}</div>
+        <div className="taxinv-signspace">Authorised Signatory</div>
+        <div className="sub" style={{ fontStyle: 'italic' }}>This is a computer-generated invoice — no physical/digital signature required.</div>
+      </div>
+    </div>
   );
 }
 
