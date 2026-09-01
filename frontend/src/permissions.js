@@ -41,10 +41,13 @@ export const ACCESS = {
 
 export const APPROVER_ROLES = ['Admin', 'Finance Head', 'Center/Portfolio Head'];
 
+const MODULE_ALIAS = { gstrecon: 'reports', tdsrecon: 'reports', agreementrecon: 'reports', sdrecon: 'reports', reportcenter: 'reports' };
+
 export function accessFor(role, module) {
   const r = ACCESS[role];
   if (!r) return 'none';
-  return r[module] || 'none';
+  const m = MODULE_ALIAS[module] || module;
+  return r[m] || 'none';
 }
 export function canView(role, module) { return accessFor(role, module) !== 'none'; }
 export function canEdit(role, module) { return accessFor(role, module) === 'edit'; }

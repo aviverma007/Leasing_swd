@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { api, setToken, getToken, setAuthExpiredHandler } from './api.js';
 import Login from './Login.jsx';
 import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
@@ -253,6 +254,7 @@ function ViewRouter(props) {
   if (view === 'disbursement') return <DisbursementPage {...props} />;
   if (view === 'deletions') return <DeletionsPage {...props} />;
   if (view === 'reports') return <ReportsPage {...props} />;
+  if (view === 'reportcenter') return <ReportCenterPage {...props} />;
   if (view === 'gstrecon') return <GstReconPage {...props} />;
   if (view === 'tdsrecon') return <TdsReconPage {...props} />;
   if (view === 'agreementrecon') return <AgreementReconPage {...props} />;
@@ -2755,6 +2757,163 @@ function SdReconPage({ notify }) {
             </table>
           )}
         </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Report Center: every report as downloadable Excel (.xlsx) ── */
+function ReportCenterPage({ db, notify }) {
+  const [busy, setBusy] = React.useState('');
+
+  const aoaSheet = (wb, name, header, rows) => {
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    ws['!cols'] = header.map((h, i) => ({ wch: Math.max(String(h).length + 2, ...rows.slice(0, 50).map(r => String(r[i] ?? '').length + 2), 10) }));
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  };
+  const saveWb = (wb, fname) => { XLSX.writeFile(wb, fname); notify(`Downloaded ${fname}`); };
+
+  /* ---- data builders (header + rows) ---- */
+  const bBilling = () => [
+    ['Invoice No', 'Type', 'Brand', 'Unit', 'Period', 'Taxable (Rs)', 'CGST', 'SGST', 'IGST', 'GST Total', 'Invoice Total', 'Paid', 'Balance', 'Due Date', 'Status', 'HSN/SAC', 'IRN'],
+    db.invoices.map(i => [i.no, i.type, nameOf(db.brands, i.brandId), nameOf(db.units, i.unitId), i.ym, i.amount, i.cgstAmt || 0, i.sgstAmt || 0, i.igstAmt || 0, i.gstAmt, i.total, i.paid || 0, i.balance ?? (i.total - (i.paid || 0)), i.dueDate, i.status, i.hsnCode || '997212', i.irn || ''])
+  ];
+  const bCollections = () => [
+    ['Receipt No', 'Date', 'Invoice No', 'Brand', 'Amount (Rs)', 'TDS %', 'TDS (Rs)', 'SD Adjusted', 'Instrument', 'Reference'],
+    db.collections.map(c => {
+      const inv = findById(db.invoices, c.invoiceId) || {};
+      return [c.no, c.date, inv.no || '', nameOf(db.brands, inv.brandId), c.amount, c.tdsPct || 0, c.tds || 0, c.sdAdjAmt || 0, c.instrument || '', c.ref || ''];
+    })
+  ];
+  const bBrands = () => [
+    ['Brand Code', 'Brand', 'Company', 'Category', 'PAN', 'GSTIN', 'Active Leases', 'Units Occupied', 'Total Billed (Rs)', 'Total Collected (Rs)'],
+    db.brands.map(b => {
+      const leases = db.leases.filter(l => l.brandId === b.id);
+      const invs = db.invoices.filter(i => i.brandId === b.id);
+      const billed = invs.reduce((s2, i) => s2 + i.total, 0);
+      const paid = invs.reduce((s2, i) => s2 + (i.paid || 0), 0);
+      return [b.code, b.name, nameOf(db.companies, b.companyId), b.category || '', b.panNo || '', b.gstin || '', leases.filter(l => l.status === 'Active').length, [...new Set(leases.map(l => nameOf(db.units, l.unitId)))].join(', '), billed, paid];
+    })
+  ];
+  const bLeases = () => [
+    ['Lease Code', 'Brand', 'Unit', 'Project', 'Rental Type', 'MG (Rs)', 'MG Basis', 'RS %', 'CAM/sqft', 'Utility/sqft', 'GST %', 'Security Deposit', 'Start', 'End', 'Status', 'On Hold', 'Lessor (SPV)', 'Lessor GSTIN', 'Lessee GSTIN', 'HSN', 'Pay Terms (days)', 'Alerts'],
+    db.leases.map(l => [l.code, nameOf(db.brands, l.brandId), nameOf(db.units, l.unitId), nameOf(db.assets, l.assetId), l.rentalType, l.mg, l.mgBasis, l.revSharePct, l.cam, l.utility, l.gst, l.deposit, l.startDate, l.endDate, l.status, l.onHold ? 'Yes' : 'No', l.lessorName || '', l.lessorGstin || '', l.lesseeGstin || '', l.hsnCode || '', l.paymentTermsDays || 7, l.alertsEnabled === false ? 'Muted' : 'On'])
+  ];
+  const bUnits = () => [
+    ['Unit Code', 'Unit', 'Project', 'Block', 'Floor', 'Type', 'PLC', 'Carpet (sqft)', 'Covered (sqft)', 'Super (sqft)', 'Status', 'Owner'],
+    db.units.map(u => [u.code, u.name, nameOf(db.assets, u.assetId), nameOf(db.blocks, u.blockId), u.floor, u.unitType || '', u.plc || '', u.carpetArea || 0, u.coveredArea || 0, u.builtupArea || 0, u.status, u.owner || ''])
+  ];
+  const bOutstanding = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    return [
+      ['Invoice No', 'Brand', 'Unit', 'Period', 'Total (Rs)', 'Paid', 'Balance', 'Due Date', 'Days Overdue', 'Ageing Bucket'],
+      db.invoices.filter(i => i.status !== 'Paid').map(i => {
+        const days = Math.max(0, Math.floor((new Date(today) - new Date(i.dueDate)) / 86400000));
+        const bucket = days === 0 ? 'Not due' : days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
+        return [i.no, nameOf(db.brands, i.brandId), nameOf(db.units, i.unitId), i.ym, i.total, i.paid || 0, i.balance ?? (i.total - (i.paid || 0)), i.dueDate, days, bucket];
+      })
+    ];
+  };
+  const bDisb = () => [
+    ['Voucher', 'Month', 'Investor', 'Unit', 'Gross Rent', 'Deductions', 'TDS %', 'TDS (Rs)', 'Outstanding', 'Net Payable', 'Mode', 'Ref', 'Status'],
+    db.disbursals.map(d => [d.no, d.month, d.investorName, nameOf(db.units, d.unitId), d.rentGross, d.totalDeductions, d.tdsPct, d.tdsAmt, d.outstanding, d.netPayable, d.mode || '', d.ref || '', d.status])
+  ];
+
+  /* ---- API-backed builders ---- */
+  const bGst = async () => {
+    const rows = await api.reports.gstRecon();
+    return [
+      ['Month', 'Invoices', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total GST', 'Gross Invoiced', 'Collected', 'Outstanding'],
+      rows.map(r => [r.ym, r.invoiceCount, r.taxableValue, r.cgstInvoiced, r.sgstInvoiced, r.igstInvoiced, r.totalGst, r.grossInvoiced, r.totalCollected, r.outstanding])
+    ];
+  };
+  const bTds = async () => {
+    const d = await api.reports.tdsRecon();
+    return [
+      ['Receipt No', 'Date', 'Invoice No', 'Type', 'Month', 'Brand', 'Amount Received', 'TDS %', 'TDS Deducted', 'Instrument', 'Ref'],
+      d.rows.map(r => [r.receiptNo, r.collDate, r.invoiceNo, r.invoiceType, r.ym, r.brandName, r.amtReceived, r.tdsPct, r.tdsDeducted, r.instrument || '', r.ref || ''])
+    ];
+  };
+  const bAgreement = async () => {
+    const rows = await api.reports.agreementRecon();
+    return [
+      ['Lease', 'Brand', 'Unit', 'Start', 'End', 'Type', 'MG', 'MG Basis', 'RS %', 'CAM', 'GST %', 'SD', 'MG Billed', 'RS Billed', 'CAM Billed', 'Total Received', 'TDS Received'],
+      rows.map(r => [r.leaseCode, r.brandName, r.unitName, r.startDate, r.endDate, r.rentalType, r.mg, r.mgBasis, r.revSharePct, r.cam, r.gst, r.deposit, r.mgBilled, r.rsBilled, r.camBilled, r.totalReceived, r.tdsReceived])
+    ];
+  };
+  const bSd = async () => {
+    const rows = await api.reports.sdRecon();
+    return [
+      ['Lease', 'Brand', 'Unit', 'SD Agreed', 'SD Collected', 'SD Adjusted', 'SD Balance'],
+      rows.map(r => [r.leaseCode, r.brandName, r.unitName, r.sdAgreed, r.sdCollected, r.sdAdjusted, r.sdBalance])
+    ];
+  };
+  const bSap = async () => {
+    const rows = await api.reports.sapEntries();
+    return [['GL Account', 'Document', 'Type', 'Amount (Rs)'], rows.map(r => [r.gl, r.doc, r.type, r.amount])];
+  };
+
+  const REPORTS = [
+    { key: 'billing', name: 'Billing Report', desc: 'Every invoice with GST bifurcation, paid & balance', build: bBilling },
+    { key: 'collections', name: 'Collection Report', desc: 'All receipts with TDS and SD adjustments', build: bCollections },
+    { key: 'outstanding', name: 'Outstanding & Ageing', desc: 'Unpaid invoices with days-overdue buckets', build: bOutstanding },
+    { key: 'gst', name: 'GST Report', desc: 'Month-wise CGST / SGST / IGST vs collected', build: bGst, async: true },
+    { key: 'tds', name: 'TDS Report', desc: 'Receipt-wise TDS for Form 26Q / 27Q', build: bTds, async: true },
+    { key: 'brands', name: 'Brand Report', desc: 'Brands with GSTIN/PAN, leases, billed vs collected', build: bBrands },
+    { key: 'leases', name: 'Lease / Property Report', desc: 'Every lease with full commercial terms & parties', build: bLeases },
+    { key: 'units', name: 'Inventory / Unit Report', desc: 'All units with type, PLC and areas', build: bUnits },
+    { key: 'agreement', name: 'Agreement Reconciliation', desc: 'Lease terms vs actual billed & received', build: bAgreement, async: true },
+    { key: 'sd', name: 'SD Reconciliation', desc: 'Deposits agreed / collected / adjusted / balance', build: bSd, async: true },
+    { key: 'disb', name: 'Disbursement Report', desc: 'Investor rent disbursal vouchers', build: bDisb },
+    { key: 'sap', name: 'SAP GL Entry Book', desc: 'GL postings for SAP upload', build: bSap, async: true }
+  ];
+
+  const downloadOne = async (r) => {
+    setBusy(r.key);
+    try {
+      const [header, rows] = r.async ? await r.build() : r.build();
+      const wb = XLSX.utils.book_new();
+      aoaSheet(wb, r.name, header, rows);
+      saveWb(wb, r.name.replace(/[^A-Za-z0-9]+/g, '_') + '.xlsx');
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+
+  const downloadAll = async () => {
+    setBusy('all');
+    try {
+      const wb = XLSX.utils.book_new();
+      for (const r of REPORTS) {
+        try {
+          const [header, rows] = r.async ? await r.build() : r.build();
+          aoaSheet(wb, r.name, header, rows);
+        } catch (_) { /* skip failing sheet */ }
+      }
+      saveWb(wb, 'Leasing_All_Reports_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+
+  return (
+    <>
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <div className="ph"><h3>📗 Master workbook</h3>
+          <button className="btn btn-teal" onClick={downloadAll} disabled={busy !== ''}>
+            {busy === 'all' ? 'Building…' : '⬇ Download ALL reports (one .xlsx, 12 sheets)'}
+          </button>
+        </div>
+        <div className="pb"><p className="sub" style={{ padding: '4px 2px' }}>One Excel file with every report as a separate sheet — ideal for sharing with finance / HOD.</p></div>
+      </div>
+      <div className="rc-grid">
+        {REPORTS.map(r => (
+          <div className="panel rc-card" key={r.key}>
+            <div className="rc-name">{r.name}</div>
+            <div className="sub rc-desc">{r.desc}</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => downloadOne(r)} disabled={busy !== ''}>
+              {busy === r.key ? 'Building…' : '⬇ Excel (.xlsx)'}
+            </button>
+          </div>
+        ))}
       </div>
     </>
   );

@@ -335,3 +335,9 @@ table.ledger tr.tot td{font-weight:700;border-top:1px solid var(--line);padding-
 .fmt-toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-right:auto}
 .fmt-toggle button{border:none;background:#fff;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600}
 .fmt-toggle button.on{background:var(--teal,#0d9488);color:#fff}
+
+/* Report Center grid */
+.rc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.rc-card{padding:16px;display:flex;flex-direction:column;gap:8px}
+.rc-name{font-weight:700;font-size:14px}
+.rc-desc{min-height:32px;line-height:1.45}
