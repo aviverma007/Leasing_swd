@@ -1425,7 +1425,6 @@ function ViewInvoiceModal({ id, db, onClose, setModal }) {
   const asset = unit ? findById(db.assets, unit.assetId) : null;
   const company = brand ? findById(db.companies, brand.companyId) : null;
 
-  // Resolve print-context landlord/tenant data (prefer server-fetched, fallback to local)
   const landlord = printData?.landlord || {
     name: asset?.landlordName || asset?.name, address: asset?.landlordAddress,
     gstin: asset?.gstin, pan: asset?.panNo,
@@ -1438,12 +1437,13 @@ function ViewInvoiceModal({ id, db, onClose, setModal }) {
   };
   const inv = printData?.invoice || i;
   const igstMode = (inv.igstAmt || 0) > 0;
-  const cgstPct = igstMode ? 0 : (inv.gstPct || 0) / 2;
-  const sgstPct = igstMode ? 0 : (inv.gstPct || 0) / 2;
-  const igstPct = igstMode ? (inv.gstPct || 0) : 0;
+  const gstPct = inv.gstPct || 0;
   const leaseInfo = printData?.lease;
   const payDays = leaseInfo?.paymentTermsDays || inv.paymentTermsDays || 7;
   const hsnCode = leaseInfo?.hsnCode || inv.hsnCode || '997212';
+  const pos = inv.placeOfSupply || 'HARYANA';
+  const docDate = fmtDate(inv.ackDate ? inv.ackDate.slice(0, 10) : i.dueDate);
+  const balance = inv.balance ?? (inv.total - (inv.paid || 0));
 
   const printInvoice = () => window.print();
 
@@ -1451,93 +1451,135 @@ function ViewInvoiceModal({ id, db, onClose, setModal }) {
     <Modal title={`Tax Invoice — ${i.no}`} onClose={onClose} wide
       footer={<><button className="btn btn-ghost" onClick={printInvoice}>🖨 Print</button><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-teal btn-sm" onClick={() => { onClose(); setModal({ type: 'sdAdjust', id }); }}>SD Adjust</button></>}>
       {loading ? <div className="empty"><p>Loading invoice…</p></div> : (
-        <div className="inv inv-print">
-          {/* Header */}
-          <div className="inv-header">
-            <div className="inv-header-left">
-              <h3>TAX INVOICE</h3>
-              <div className="inv-einvoice-note">
-                This is a computer-generated document. No physical/digital signature is required.
+        <div className="einv inv-print">
+          {/* Top: supplier GSTIN + name, QR-style IRN box */}
+          <div className="einv-top">
+            <div>
+              <div className="einv-gstin">{landlord.gstin || 'GSTIN NOT SET'}</div>
+              <div className="einv-suppname">{(landlord.name || '—').toUpperCase()}</div>
+            </div>
+            <div className="einv-qr">
+              <div className="einv-qr-box">IRN QR</div>
+              <div className="einv-qr-sub">{i.irn ? i.irn.slice(0, 16) + '…' : '—'}</div>
+            </div>
+          </div>
+
+          {/* 1. e-Invoice Details */}
+          <div className="einv-sec">
+            <div className="einv-sec-hd">1. e-Invoice Details</div>
+            <div className="einv-grid3">
+              <div><b>IRN :</b> <span className="einv-mono">{i.irn || '—'}</span></div>
+              <div><b>Ack No. :</b> {inv.ackNo || '—'}</div>
+              <div><b>Ack Date :</b> {inv.ackDate ? new Date(inv.ackDate).toLocaleString('en-IN') : docDate}</div>
+            </div>
+          </div>
+
+          {/* 2. Transaction Details */}
+          <div className="einv-sec">
+            <div className="einv-sec-hd">2. Transaction Details</div>
+            <div className="einv-grid3">
+              <div><b>Supply type Code :</b> B2B</div>
+              <div><b>Document No. :</b> {i.no}</div>
+              <div><b>IGST applicable despite Supplier and Recipient located in same State :</b> {igstMode ? 'Yes' : 'No'}</div>
+              <div><b>Place of Supply :</b> {pos}</div>
+              <div><b>Document Type :</b> Tax Invoice</div>
+              <div><b>Document Date :</b> {docDate}</div>
+            </div>
+          </div>
+
+          {/* 3. Party Details */}
+          <div className="einv-sec">
+            <div className="einv-sec-hd">3. Party Details</div>
+            <div className="einv-parties">
+              <div className="einv-party">
+                <div className="einv-party-t">Supplier :</div>
+                <div><b>GSTIN :</b> {landlord.gstin || '—'}</div>
+                <div className="strong">{(landlord.name || '—').toUpperCase()}</div>
+                {landlord.address && <div className="sub">{landlord.address}</div>}
+                {landlord.pan && <div><b>PAN :</b> {landlord.pan}</div>}
+              </div>
+              <div className="einv-party">
+                <div className="einv-party-t">Recipient :</div>
+                <div><b>GSTIN :</b> {tenant.gstin || '—'}</div>
+                <div className="strong">{(tenant.companyName || tenant.brandName || '—').toUpperCase()}</div>
+                {tenant.brandName && tenant.companyName && <div className="sub">{tenant.brandName} · {unit?.name} · {asset?.name}</div>}
+                {tenant.address && <div className="sub">{tenant.address}</div>}
+                <div><b>Place of Supply :</b> {pos}</div>
+                {tenant.pan && <div><b>PAN :</b> {tenant.pan}</div>}
               </div>
             </div>
-            <div className="inv-header-right">
-              <div className="inv-no">{i.no}</div>
-              <div className="sub">IRN: {i.irn || '—'}</div>
-            </div>
           </div>
 
-          {/* Biller & Recipient */}
-          <div className="inv-parties">
-            <div className="inv-party">
-              <div className="inv-party-label">BILLED BY (LANDLORD)</div>
-              <div className="strong">{landlord.name || '—'}</div>
-              {landlord.address && <div className="sub inv-addr">{landlord.address}</div>}
-              {landlord.gstin && <div className="sub"><b>GSTIN:</b> {landlord.gstin}</div>}
-              {landlord.pan && <div className="sub"><b>PAN:</b> {landlord.pan}</div>}
-            </div>
-            <div className="inv-party" style={{ textAlign: 'right' }}>
-              <div className="inv-party-label">BILLED TO (TENANT)</div>
-              <div className="strong">{tenant.brandName || '—'}</div>
-              {tenant.companyName && <div className="sub">{tenant.companyName}</div>}
-              {tenant.address && <div className="sub inv-addr">{tenant.address}</div>}
-              {tenant.gstin && <div className="sub"><b>GSTIN:</b> {tenant.gstin}</div>}
-              {tenant.pan && <div className="sub"><b>PAN:</b> {tenant.pan}</div>}
-            </div>
-          </div>
-
-          {/* Invoice meta */}
-          <div className="inv-meta-grid">
-            <div><span className="inv-meta-lbl">Invoice date</span><br />{fmtDate(i.dueDate)}</div>
-            <div><span className="inv-meta-lbl">Due date</span><br /><b>{fmtDate(i.dueDate)}</b></div>
-            <div><span className="inv-meta-lbl">Payment terms</span><br />{payDays} days from invoice date</div>
-            <div><span className="inv-meta-lbl">Period</span><br />{ymLabel(i.ym)}</div>
-            <div><span className="inv-meta-lbl">Unit / Premises</span><br />{unit?.name} · {asset?.name}</div>
-            <div><span className="inv-meta-lbl">Status</span><br /><StatusPill st={i.status} overdue={i.dueDate < curYM() + '-01'} /></div>
-          </div>
-
-          {/* Line items */}
-          <table className="line">
-            <thead>
-              <tr><th>Description</th><th>SAC/HSN</th><th className="num">Taxable Value</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>{i.desc || i.type}</td><td className="sub">{hsnCode}</td><td className="num">{money(inv.amount)}</td></tr>
-            </tbody>
-          </table>
-
-          {/* Tax breakdown */}
-          <div className="inv-tax-total">
-            <div className="inv-notes">
-              <div className="inv-note"><b>TDS:</b> TDS as applicable under the Income Tax Act, 1961.</div>
-              {landlord.bank?.acc && (
-                <div className="inv-bank">
-                  <b>Bank details for payment:</b><br />
-                  {landlord.bank.name && <span>{landlord.bank.name}{landlord.bank.branch ? `, ${landlord.bank.branch}` : ''}</span>}<br />
-                  <span>A/c No: {landlord.bank.acc}</span>{landlord.bank.ifsc && <span> · IFSC: {landlord.bank.ifsc}</span>}
-                  {landlord.bank.micr && <span> · MICR: {landlord.bank.micr}</span>}
-                </div>
-              )}
-            </div>
-            <table className="ledger" style={{ width: 300 }}>
+          {/* 4. Details of Goods / Services */}
+          <div className="einv-sec">
+            <div className="einv-sec-hd">4. Details of Goods / Services</div>
+            <table className="einv-tbl">
+              <thead>
+                <tr><th>SlNo</th><th>Item Description</th><th>HSN Code</th><th>Quantity</th><th>Unit</th><th className="num">Unit Price(Rs)</th><th className="num">Discount(Rs)</th><th className="num">Taxable Amount(Rs)</th><th>Tax Rate (GST + Cess)</th><th className="num">Total</th></tr>
+              </thead>
               <tbody>
-                <tr><td>Taxable value</td><td className="r">{money(inv.amount)}</td></tr>
-                {igstMode ? (
-                  <tr><td>IGST @ {igstPct}%</td><td className="r">{money(inv.igstAmt || 0)}</td></tr>
-                ) : (
-                  <>
-                    <tr><td>CGST @ {cgstPct}%</td><td className="r">{money(inv.cgstAmt || 0)}</td></tr>
-                    <tr><td>SGST @ {sgstPct}%</td><td className="r">{money(inv.sgstAmt || 0)}</td></tr>
-                  </>
-                )}
-                <tr className="tot"><td><b>Invoice total</b></td><td className="r"><b>{money(inv.total)}</b></td></tr>
-                <tr><td>Paid</td><td className="r">{money(inv.paid || 0)}</td></tr>
-                <tr style={{ color: 'var(--amber)' }}><td><b>Balance due</b></td><td className="r"><b>{money(inv.balance ?? (inv.total - (inv.paid || 0)))}</b></td></tr>
+                <tr>
+                  <td>1</td>
+                  <td>{i.desc || i.type}</td>
+                  <td>{hsnCode}</td>
+                  <td>1</td>
+                  <td>OTH</td>
+                  <td className="num">{Number(inv.amount).toFixed(2)}</td>
+                  <td className="num">0</td>
+                  <td className="num">{Number(inv.amount).toFixed(2)}</td>
+                  <td>{gstPct.toFixed(2)} + 0.00 | 0.00 + 0</td>
+                  <td className="num">{Number(inv.total).toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <table className="einv-tbl einv-taxrow">
+              <thead>
+                <tr><th className="num">Tax'ble Amt</th><th className="num">CGST Amt</th><th className="num">SGST Amt</th><th className="num">IGST Amt</th><th className="num">CESS Amt</th><th className="num">State CESS</th><th className="num">Discount</th><th className="num">Other Charges</th><th className="num">Round off Amt</th><th className="num">Tot Inv. Amt</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="num">{Number(inv.amount).toFixed(2)}</td>
+                  <td className="num">{Number(inv.cgstAmt || 0).toFixed(2)}</td>
+                  <td className="num">{Number(inv.sgstAmt || 0).toFixed(2)}</td>
+                  <td className="num">{Number(inv.igstAmt || 0).toFixed(2)}</td>
+                  <td className="num">0.00</td>
+                  <td className="num">0.00</td>
+                  <td className="num">0.00</td>
+                  <td className="num">0.00</td>
+                  <td className="num">0.00</td>
+                  <td className="num"><b>{Number(inv.total).toFixed(2)}</b></td>
+                </tr>
               </tbody>
             </table>
           </div>
 
-          <div className="inv-footer-note">
-            Subject to Gurugram / Haryana jurisdiction. E-invoice — physical or digital signature not required.
+          {/* 5. Payment & compliance */}
+          <div className="einv-sec">
+            <div className="einv-sec-hd">5. Payment Terms & Compliance</div>
+            <div className="einv-grid3">
+              <div><b>Payment terms :</b> {payDays} days from invoice date</div>
+              <div><b>Due date :</b> {fmtDate(i.dueDate)}</div>
+              <div><b>Status :</b> {inv.status} {balance > 0 ? `(Balance ₹${Number(balance).toLocaleString('en-IN')})` : ''}</div>
+            </div>
+            <div className="einv-note"><b>TDS :</b> TDS as applicable under the Income Tax Act, 1961.</div>
+            {landlord.bank?.acc && (
+              <div className="einv-note">
+                <b>Bank details for payment :</b> {landlord.bank.name}{landlord.bank.branch ? `, ${landlord.bank.branch}` : ''} · A/c No: {landlord.bank.acc}{landlord.bank.ifsc ? ` · IFSC: ${landlord.bank.ifsc}` : ''}{landlord.bank.micr ? ` · MICR: ${landlord.bank.micr}` : ''}
+              </div>
+            )}
+          </div>
+
+          {/* Footer strip */}
+          <div className="einv-foot">
+            <div>
+              <div><b>Generated By :</b> {landlord.gstin || '—'}</div>
+              <div><b>Print Date :</b> {new Date().toLocaleString('en-IN')}</div>
+            </div>
+            <div className="einv-ack-bar">{inv.ackNo || ''}</div>
+            <div className="einv-sign">
+              <div className="einv-esign">e-Invoice</div>
+              <div className="sub">This is a computer-generated invoice.<br />No physical/digital signature required.</div>
+            </div>
           </div>
         </div>
       )}

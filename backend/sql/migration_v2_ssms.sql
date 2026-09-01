@@ -111,3 +111,14 @@ JOIN sys.schemas s ON s.schema_id=t.schema_id
 WHERE s.name='leasing' AND c.name IN ('PanNo','Gstin','CgstAmt','SgstAmt','IgstAmt','HsnCode','PaymentTermsDays','SdAdjAmt','PoolGroupId','IgstApplicable','BankName','BankAcc','UnitType','Plc','CoveredArea','ReraNo','OcStatus')
 ORDER BY t.name, c.name;
 PRINT 'All finance columns verified.';
+
+/* ── e-Invoice reference fields (NIC-IRP format): Ack No, Ack Date, Place of Supply ── */
+IF COL_LENGTH('leasing.Invoices','AckNo') IS NULL ALTER TABLE leasing.Invoices ADD AckNo VARCHAR(20) NULL;
+IF COL_LENGTH('leasing.Invoices','AckDate') IS NULL ALTER TABLE leasing.Invoices ADD AckDate DATETIME2 NULL;
+IF COL_LENGTH('leasing.Invoices','PlaceOfSupply') IS NULL ALTER TABLE leasing.Invoices ADD PlaceOfSupply NVARCHAR(60) NULL;
+GO
+UPDATE leasing.Invoices SET PlaceOfSupply='HARYANA' WHERE PlaceOfSupply IS NULL;
+UPDATE leasing.Invoices SET AckNo=CAST(CAST(RAND(CHECKSUM(NEWID()))*899999999999 AS BIGINT)+100000000000 AS VARCHAR(20)) WHERE AckNo IS NULL;
+UPDATE leasing.Invoices SET AckDate=SYSDATETIME() WHERE AckDate IS NULL;
+GO
+PRINT 'e-Invoice fields added.';

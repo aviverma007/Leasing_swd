@@ -93,3 +93,9 @@ UPDATE $(SCHEMA).Leases SET PaymentTermsDays=7 WHERE PaymentTermsDays IS NULL;
 GO
 
 PRINT 'Migration v2 completed successfully.';
+
+/* ── e-Invoice reference fields ── */
+IF COL_LENGTH('$(SCHEMA).Invoices','AckNo') IS NULL ALTER TABLE $(SCHEMA).Invoices ADD AckNo VARCHAR(20) NULL;
+IF COL_LENGTH('$(SCHEMA).Invoices','AckDate') IS NULL ALTER TABLE $(SCHEMA).Invoices ADD AckDate DATETIME2 NULL;
+IF COL_LENGTH('$(SCHEMA).Invoices','PlaceOfSupply') IS NULL ALTER TABLE $(SCHEMA).Invoices ADD PlaceOfSupply NVARCHAR(60) NULL;
+GO

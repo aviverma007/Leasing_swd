@@ -49,9 +49,12 @@ async function pushInvoice(pool, lease, type, desc, amount, ym, due) {
     .input('cgstAmt', sql.Decimal(18, 2), cgstAmt).input('sgstAmt', sql.Decimal(18, 2), sgstAmt).input('igstAmt', sql.Decimal(18, 2), igstAmt)
     .input('total', sql.Decimal(18, 2), total).input('due', sql.Date, due).input('irn', sql.VarChar(64), irnHex())
     .input('hsnCode', sql.VarChar(20), hsnCode).input('paymentTermsDays', sql.Int, paymentTermsDays)
+    .input('ackNo', sql.VarChar(20), String(Math.floor(1e11 + Math.random() * 9e11)))
+    .input('ackDate', sql.DateTime2, new Date())
+    .input('pos', sql.NVarChar(60), 'HARYANA')
     .query(`INSERT INTO ${SCHEMA}.Invoices
-      (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays)
-      VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays)`);
+      (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays,AckNo,AckDate,PlaceOfSupply)
+      VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays,@ackNo,@ackDate,@pos)`);
   return 1;
 }
 

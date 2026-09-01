@@ -16,6 +16,7 @@ function mapInvoice(r, paid) {
     desc: r.Descr, amount: Number(r.Amount), gstPct: Number(r.GstPct), gstAmt: Number(r.GstAmt),
     cgstAmt: Number(r.CgstAmt || 0), sgstAmt: Number(r.SgstAmt || 0), igstAmt: Number(r.IgstAmt || 0),
     hsnCode: r.HsnCode || '997212', paymentTermsDays: r.PaymentTermsDays || 7,
+    ackNo: r.AckNo || null, ackDate: r.AckDate ? new Date(r.AckDate).toISOString() : null, placeOfSupply: r.PlaceOfSupply || 'HARYANA',
     total, dueDate: r.DueDate.toISOString().slice(0, 10), irn: r.Irn, paid: p,
     balance: round2(total - p), status, poolGroupId: r.PoolGroupId || null
   };
@@ -164,8 +165,11 @@ router.post('/adhoc', async (req, res) => {
       .input('cgstAmt', sql.Decimal(18, 2), cgstAmt).input('sgstAmt', sql.Decimal(18, 2), sgstAmt).input('igstAmt', sql.Decimal(18, 2), igstAmt)
       .input('total', sql.Decimal(18, 2), total).input('due', sql.Date, due).input('irn', sql.VarChar(64), irnHex())
       .input('hsnCode', sql.VarChar(20), lease.HsnCode || '997212').input('paymentTermsDays', sql.Int, lease.PaymentTermsDays || 7)
-      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays)
-        VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays)`);
+      .input('ackNo', sql.VarChar(20), String(Math.floor(1e11 + Math.random() * 9e11)))
+      .input('ackDate', sql.DateTime2, new Date())
+      .input('pos', sql.NVarChar(60), 'HARYANA')
+      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays,AckNo,AckDate,PlaceOfSupply)
+        VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays,@ackNo,@ackDate,@pos)`);
     res.json({ id, no });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
