@@ -310,3 +310,8 @@ table.ledger tr.tot td{font-weight:700;border-top:1px solid var(--line);padding-
 .einv-ack-bar{font-family:'Libre Barcode 39',var(--mono);font-size:13px;letter-spacing:3px;border:1px solid #999;padding:6px 10px;background:repeating-linear-gradient(90deg,#111 0 2px,#fff 2px 5px);color:transparent;min-width:150px;text-align:center}
 .einv-sign{text-align:right}
 .einv-esign{font-size:22px;font-weight:800;font-style:italic;color:#1a9bd7;font-family:Georgia,serif}
+
+/* per-lease alert bell toggle */
+.bell-toggle{background:none;border:1px solid var(--line,#e2e8f0);border-radius:8px;font-size:15px;padding:3px 8px;cursor:pointer;opacity:.35;transition:all .15s}
+.bell-toggle.on{opacity:1;border-color:#f59e0b;background:#fffbeb}
+.bell-toggle:hover{transform:scale(1.1)}

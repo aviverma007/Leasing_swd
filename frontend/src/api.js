@@ -50,6 +50,7 @@ export const api = {
   leases: {
     ...crud('/leases'),
     hold: (id, remarks) => req('POST', `/leases/${id}/hold`, { remarks }),
+    setAlerts: (id, enabled) => req('POST', `/leases/${id}/alerts`, { enabled }),
     release: (id) => req('POST', `/leases/${id}/release`)
   },
   sales: crud('/sales'),

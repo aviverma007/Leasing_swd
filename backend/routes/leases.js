@@ -23,6 +23,7 @@ function mapLease(r) {
     rentalType: r.RentalType, mgBasis: r.MgBasis, mg: Number(r.Mg), revSharePct: Number(r.RevSharePct),
     cam: Number(r.Cam), utility: Number(r.Utility), esc: Number(r.Esc), deposit: Number(r.Deposit),
     gst: Number(r.Gst), onHold: !!r.OnHold, holdRemarks: r.HoldRemarks, status: r.Status,
+    alertsEnabled: r.AlertsEnabled == null ? true : !!r.AlertsEnabled,
     ...mapExtra(r)
   };
 }
@@ -144,6 +145,17 @@ router.delete('/:id', async (req, res) => {
     const result = await handleDelete('leases', req.params.id, req.user, req.body?.reason);
     res.json(result);
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/* Toggle billing/payment alerts for a lease */
+router.post('/:id/alerts', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const enabled = req.body && req.body.enabled ? 1 : 0;
+    await pool.request().input('id', sql.VarChar(40), req.params.id).input('en', sql.Bit, enabled)
+      .query(`UPDATE ${SCHEMA}.Leases SET AlertsEnabled=@en WHERE Id=@id`);
+    res.json({ id: req.params.id, alertsEnabled: !!enabled });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;

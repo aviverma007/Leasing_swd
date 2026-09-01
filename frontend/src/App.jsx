@@ -728,11 +728,12 @@ function Dashboard({ db }) {
   const today = new Date().toISOString().slice(0, 10);
   const currYm = curYM();
   const invoicedLeaseYmTypes = new Set(db.invoices.map((i) => `${i.leaseId}|${i.ym}|${i.type}`));
-  const billingDue = db.leases.filter((l) => !l.onHold && l.status === 'Active' && ['MG', 'MGvsRS'].includes(l.rentalType) && !invoicedLeaseYmTypes.has(`${l.id}|${currYm}|MG`));
-  const overdueInv = db.invoices.filter((i) => i.dueDate < today && i.status !== 'Paid').slice(0, 10);
+  const billingDue = db.leases.filter((l) => !l.onHold && l.status === 'Active' && l.alertsEnabled !== false && ['MG', 'MGvsRS'].includes(l.rentalType) && !invoicedLeaseYmTypes.has(`${l.id}|${currYm}|MG`));
+  const mutedLeases = new Set(db.leases.filter((l) => l.alertsEnabled === false).map((l) => l.id));
+  const overdueInv = db.invoices.filter((i) => i.dueDate < today && i.status !== 'Paid' && !mutedLeases.has(i.leaseId)).slice(0, 10);
   const upcomingInv = db.invoices.filter((i) => {
     const d7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    return i.dueDate >= today && i.dueDate <= d7 && i.status !== 'Paid';
+    return i.dueDate >= today && i.dueDate <= d7 && i.status !== 'Paid' && !mutedLeases.has(i.leaseId);
   });
   const totalAlerts = billingDue.length + overdueInv.length + upcomingInv.length;
 
@@ -873,7 +874,7 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
       <div className="tablewrap">
         {db.leases.length === 0 ? <EmptyState thing="lease" onAdd={canEditView ? () => setModal({ type: 'lease' }) : null} /> : (
           <table>
-            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Stage</th><th>Hold</th><th></th></tr></thead>
+            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Stage</th><th>Hold</th><th>Alerts</th><th></th></tr></thead>
             <tbody>
               {rows.map((l) => (
                 <tr key={l.id}>
@@ -884,6 +885,17 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
                   <td className="sub">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
                   <td>{l.stage ? <Pill color="grey">{l.stage}</Pill> : (l.brandStatus ? <span className="sub">{l.brandStatus}</span> : '—')}</td>
                   <td>{l.onHold ? <Pill color="amber">On hold</Pill> : <Pill color="green">Active</Pill>}</td>
+                  <td>
+                    <button
+                      className={'bell-toggle' + (l.alertsEnabled !== false ? ' on' : '')}
+                      title={l.alertsEnabled !== false ? 'Alerts ON — click to mute this lease' : 'Alerts OFF — click to enable'}
+                      onClick={async () => {
+                        try { await api.leases.setAlerts(l.id, l.alertsEnabled === false); await refresh(['leases']); }
+                        catch (e) { notify(e.message, true); }
+                      }}>
+                      {l.alertsEnabled !== false ? '🔔' : '🔕'}
+                    </button>
+                  </td>
                   <td className="rowact">
                     {pendingIds.has(l.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
                       <>

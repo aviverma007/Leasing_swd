@@ -122,3 +122,7 @@ UPDATE leasing.Invoices SET AckNo=CAST(CAST(RAND(CHECKSUM(NEWID()))*899999999999
 UPDATE leasing.Invoices SET AckDate=SYSDATETIME() WHERE AckDate IS NULL;
 GO
 PRINT 'e-Invoice fields added.';
+
+/* ── Per-lease alert opt-in ── */
+IF COL_LENGTH('leasing.Leases','AlertsEnabled') IS NULL ALTER TABLE leasing.Leases ADD AlertsEnabled BIT NOT NULL DEFAULT 1;
+GO

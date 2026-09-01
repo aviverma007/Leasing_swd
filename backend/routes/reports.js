@@ -212,6 +212,7 @@ router.get('/alerts', async (req, res) => {
       JOIN ${SCHEMA}.Brands b ON b.Id=l.BrandId
       JOIN ${SCHEMA}.Units u ON u.Id=l.UnitId
       WHERE l.Status='Active' AND l.OnHold=0
+        AND ISNULL(l.AlertsEnabled,1)=1
         AND l.RentalType IN ('MG','MGvsRS')
         AND NOT EXISTS (SELECT 1 FROM ${SCHEMA}.Invoices WHERE LeaseId=l.Id AND Ym=@ym AND Type='MG')`);
 
