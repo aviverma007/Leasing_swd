@@ -132,14 +132,26 @@ function sqlType(f) {
   return sql.NVarChar(len || 200);
 }
 
-// coerce an incoming value to a DB-safe value
+// coerce an incoming value to a DB-safe value.
+// Defensive: truncates strings to the declared column length, validates dates,
+// and bounds decimals — a bad value becomes NULL or a trimmed value, never a
+// TDS protocol error ("Data type 0xE7 has an invalid data length").
 function coerce(f, v) {
-  const type = f[2];
+  const [, , type, len] = f;
   if (v === undefined || v === null || v === '') return null;
-  if (type === 'dec') { const n = Number(v); return isFinite(n) ? n : null; }
+  if (type === 'dec') {
+    const n = Number(v);
+    if (!isFinite(n) || Math.abs(n) >= 1e16) return null; // Decimal(18,2) bound
+    return Math.round(n * 100) / 100;
+  }
   if (type === 'int') { const n = parseInt(v, 10); return isFinite(n) ? n : null; }
-  if (type === 'date') { return v; } // 'YYYY-MM-DD' string
-  return String(v);
+  if (type === 'date') {
+    const str = String(v).slice(0, 10); // tolerate full ISO datetimes
+    return /^\d{4}-\d{2}-\d{2}$/.test(str) && !isNaN(Date.parse(str)) ? str : null;
+  }
+  const out = String(v).trim();
+  if (!out) return null;
+  return out.slice(0, len || 200); // never exceed the declared NVARCHAR length
 }
 
 // map a DB row's extra columns back to JSON keys

@@ -25,8 +25,15 @@ function getPool() {
   if (!poolPromise) {
     poolPromise = new sql.ConnectionPool(config)
       .connect()
-      .then(pool => {
+      .then(async pool => {
         console.log('Connected to SQL Server:', config.server, '/', config.database);
+        // Ensure every column the code expects exists (idempotent, logged).
+        try {
+          const { autoMigrate } = require('./lib/autoMigrate');
+          await autoMigrate(pool, sql, SCHEMA);
+        } catch (e) {
+          console.error('[autoMigrate] skipped:', e.message);
+        }
         return pool;
       })
       .catch(err => {
