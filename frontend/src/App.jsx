@@ -19,7 +19,7 @@ export default function App() {
   const [db, setDb] = useState(EMPTY_DB);
   const [pendingDel, setPendingDel] = useState({}); // entity -> [recordIds] with pending deletion
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState('home');
   const [currentProject, setCurrentProject] = useState('all'); // asset id or 'all'
   const [search, setSearch] = useState('');
   const [filterVal, setFilterVal] = useState('');
@@ -153,9 +153,7 @@ export default function App() {
           {NAV.filter((n) => !n.v || canView(actingRole, n.v)).map((n, i) => n.grp && !n.v ? <div className="grp" key={i}>{n.grp}</div> : (
             <a key={n.v} className={n.v === view ? 'active' : ''} onClick={() => setView(n.v)}>
               {n.label}
-              {n.v === 'deletions'
-                ? (pendingDelCount > 0 && <span className="cnt alert">{pendingDelCount}</span>)
-                : (scopedDb[n.v] && <span className="cnt">{scopedDb[n.v].length}</span>)}
+              {n.v === 'deletions' && pendingDelCount > 0 && <span className="cnt alert">!</span>}
             </a>
           ))}
         </nav>
@@ -198,7 +196,7 @@ export default function App() {
         </div>
         <div className="wrap">
           {loading ? <div className="empty"><p>Loading…</p></div> : (
-            <ViewRouter view={view} db={scopedDb} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
+            <ViewRouter view={view} setView={setView} db={scopedDb} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
               actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} pendingDel={pendingDel} />
           )}
         </div>
@@ -242,6 +240,7 @@ function ViewRouter(props) {
   const { view } = props;
   const MASTER_KEYS = ['companies', 'assets', 'blocks', 'units', 'brands', 'users'];
   if (MASTER_KEYS.includes(view)) return <MasterListPage {...props} entity={view} />;
+  if (view === 'home') return <HomePage {...props} />;
   if (view === 'dashboard') return <Dashboard {...props} />;
   if (view === 'inventory') return <InventoryPage {...props} />;
   if (view === 'leases') return <LeasesPage {...props} />;
@@ -441,6 +440,93 @@ function ResetPasswordModal({ user, onClose, refresh, notify }) {
       <div className="field"><label>New password <span className="req">*</span></label><input type="password" value={pw} placeholder="New password" onChange={(e) => setPw(e.target.value)} /></div>
       <div className="field"><label>Confirm new password <span className="req">*</span></label><input type="password" value={pw2} placeholder="Re-enter new password" onChange={(e) => setPw2(e.target.value)} /></div>
     </Modal>
+  );
+}
+
+
+/* ===================== HOME — dark analytics landing ===================== */
+function HomePage({ db, setView }) {
+  const leased = (db.units || []).filter((u) => u.status === 'Leased').length;
+  return (
+    <div className="home">
+      {/* ── Hero ── */}
+      <section className="home-hero">
+        <div className="home-hero-txt">
+          <h1>Leasing intelligence for<br />Smart World commercial assets</h1>
+          <p>One platform for the complete leasing lifecycle — inventory, agreements, GST-compliant
+             billing, collections, security deposits and investor disbursement — with reconciliation
+             reports your finance team can trust.</p>
+          <div className="home-cta">
+            <button className="btn btn-teal" onClick={() => setView('dashboard')}>Open Dashboard</button>
+            <button className="btn home-ghost" onClick={() => setView('reportcenter')}>Explore Reports</button>
+          </div>
+        </div>
+        <svg className="home-hexart" viewBox="0 0 420 260" fill="none" aria-hidden="true">
+          <g stroke="#2d7ff9" strokeWidth="2">
+            <path d="M150 60 L195 34 L240 60 L240 112 L195 138 L150 112 Z" opacity=".9" />
+            <path d="M240 112 L285 86 L330 112 L330 164 L285 190 L240 164 Z" opacity=".55" />
+            <path d="M305 30 L340 10 L375 30 L375 70 L340 90 L305 70 Z" opacity=".35" />
+            <path d="M330 164 L365 144 L400 164 L400 204 L365 224 L330 204 Z" opacity=".25" />
+          </g>
+          <g fill="#2d7ff9">
+            <circle cx="195" cy="34" r="6" /><circle cx="240" cy="112" r="6" />
+            <circle cx="195" cy="138" r="5" opacity=".8" /><circle cx="285" cy="190" r="5" opacity=".6" />
+            <circle cx="330" cy="112" r="5" opacity=".7" /><circle cx="340" cy="10" r="4" opacity=".5" />
+          </g>
+          <g stroke="#2d7ff9" strokeWidth="1.5" opacity=".6">
+            <path d="M195 34 L240 112 L195 138 M240 112 L330 112 L285 190" />
+          </g>
+          <g fill="#3b82f6" opacity=".35">
+            {Array.from({ length: 36 }).map((_, i) => (
+              <circle key={i} cx={20 + (i % 9) * 14} cy={190 + Math.floor(i / 9) * 14} r="1.6" />
+            ))}
+          </g>
+        </svg>
+      </section>
+
+      {/* ── Analytics section ── */}
+      <section className="home-split">
+        <div className="home-cluster">
+          <svg viewBox="0 0 340 250" fill="none" aria-hidden="true">
+            <g stroke="#4a5e78" strokeWidth="1.2" opacity=".8">
+              <path d="M95 70 L170 70 M95 125 L140 125 M170 100 L220 70 M170 130 L220 130 M220 90 L220 110 M250 150 L250 175 M140 160 L140 190 M170 160 L220 190" />
+            </g>
+            <g>
+              <rect x="28" y="30" width="64" height="78" rx="6" fill="#f4f7fb" />
+              <circle cx="44" cy="52" r="3" fill="#2d7ff9" /><circle cx="58" cy="64" r="3" fill="#60a5fa" />
+              <circle cx="70" cy="48" r="3" fill="#2d7ff9" /><circle cx="52" cy="80" r="3" fill="#93c5fd" />
+              <circle cx="76" cy="88" r="3" fill="#60a5fa" /><rect x="36" y="38" width="26" height="4" rx="2" fill="#cbd5e1" />
+              <rect x="110" y="88" width="60" height="50" rx="6" fill="#f4f7fb" />
+              <path d="M118 126 L130 112 L142 120 L154 100 L162 108" stroke="#2d7ff9" strokeWidth="2.5" fill="none" />
+              <rect x="222" y="48" width="64" height="70" rx="6" fill="#f4f7fb" />
+              <rect x="232" y="96" width="8" height="14" fill="#93c5fd" /><rect x="246" y="84" width="8" height="26" fill="#60a5fa" />
+              <rect x="260" y="72" width="8" height="38" fill="#2d7ff9" /><rect x="232" y="58" width="36" height="4" rx="2" fill="#cbd5e1" />
+              <rect x="110" y="152" width="60" height="44" rx="6" fill="#f4f7fb" />
+              <rect x="118" y="162" width="44" height="4" rx="2" fill="#cbd5e1" /><rect x="118" y="172" width="36" height="4" rx="2" fill="#dbe4ee" />
+              <rect x="118" y="182" width="40" height="4" rx="2" fill="#dbe4ee" />
+              <rect x="222" y="152" width="60" height="48" rx="6" fill="#f4f7fb" />
+              <circle cx="252" cy="176" r="14" fill="none" stroke="#dbe4ee" strokeWidth="6" />
+              <path d="M252 162 A14 14 0 0 1 265 181" stroke="#2d7ff9" strokeWidth="6" fill="none" />
+            </g>
+          </svg>
+        </div>
+        <div className="home-split-txt">
+          <div className="home-eyebrow">SMART LEASING</div>
+          <h2>Leasing + Billing + Analytics</h2>
+          <p>Managing {db.units.length ? `${db.units.length} units` : 'commercial inventory'} across our
+             retail assets meant deal sheets, rent registers and SD trackers living in separate Excel
+             files. Smart Leasing brings them into one system — {leased ? `${leased} units already leased and billing` : 'from vacancy to invoice'} —
+             with GST bifurcation, TDS tracking and SAP-ready exports built in.</p>
+          <div className="home-callout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#2d7ff9" strokeWidth="2" style={{ width: 22, height: 22, flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" />
+            </svg>
+            <span>Generate a month of GST-compliant invoices in one click, reconcile GST / TDS / SD in
+                  minutes, and export any report to Excel — using tools familiar to every team.</span>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 

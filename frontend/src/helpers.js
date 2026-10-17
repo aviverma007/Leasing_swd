@@ -147,7 +147,8 @@ export const RENTAL_HINT = {
 };
 
 export const NAV = [
-  { v: 'dashboard', label: 'Dashboard', grp: null },
+  { v: 'home', label: 'Home', grp: null },
+  { v: 'dashboard', label: 'Dashboard' },
   { v: 'inventory', label: 'Inventory' },
   { grp: 'Masters' },
   { v: 'companies', label: 'Company' },
@@ -178,6 +179,7 @@ export const NAV = [
 ];
 
 export const PAGES = {
+  home: { t: 'Smart Leasing', s: 'Commercial leasing, billing & analytics — Smart World Developers' },
   dashboard: { t: 'Dashboard', s: 'Portfolio, billing and disbursement at a glance' },
   inventory: { t: 'Inventory', s: 'Units by project, block and floor with occupancy status' },
   companies: { t: 'Company Master', s: 'Legal entities that own brands' },
