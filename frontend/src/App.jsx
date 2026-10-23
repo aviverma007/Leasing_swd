@@ -8,6 +8,7 @@ import {
   CATEGORIES, ROLES, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES, LIFECYCLE_STAGES
 } from './helpers.js';
 import { canView, canEdit, canApproveRole, setAccessMatrix } from './permissions.js';
+import { onNextStep, suggestNextStep } from './nextSteps.js';
 
 const EMPTY_DB = {
   companies: [], assets: [], blocks: [], units: [], brands: [], users: [], customers: [], brokers: [],
@@ -28,6 +29,13 @@ export default function App() {
   useEffect(() => { roleRef.current = actingRole; }, [actingRole]);
   const [modal, setModal] = useState(null); // {type, id, ...}
   const [roleNames, setRoleNames] = useState(['Admin', ...ROLES]);
+  const [nextStep, setNextStep] = useState(null);
+  const nsTimer = useRef(null);
+  useEffect(() => onNextStep((step) => {
+    setNextStep(step);
+    if (nsTimer.current) clearTimeout(nsTimer.current);
+    nsTimer.current = setTimeout(() => setNextStep(null), 14000);
+  }), []);
   const loadRoles = useCallback(async () => {
     try {
       const { roles } = await api.roles.list();
@@ -210,14 +218,33 @@ export default function App() {
         </div>
         <div className="wrap">
           {loading ? <div className="empty"><p>Loading…</p></div> : (
+            <div className="view-anim" key={view}>
             <ViewRouter view={view} setView={setView} db={scopedDb} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
               actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} pendingDel={pendingDel}
               isAdmin={!!authUser.isAdmin} onRolesChanged={loadRoles} />
+            </div>
           )}
         </div>
       </div>
       {modal && (
         <ModalRouter modal={modal} db={db} setModal={setModal} refresh={refresh} notify={notify} actingRole={actingRole} isAdmin={authUser.isAdmin} />
+      )}
+      {nextStep && (
+        <div className="nextstep" role="status">
+          <div className="nextstep-rail" />
+          <div className="nextstep-body">
+            <div className="nextstep-done">✓ {nextStep.title}</div>
+            <div className="nextstep-desc">{nextStep.desc}</div>
+            <div className="nextstep-actions">
+              <button className="btn btn-teal btn-sm" onClick={() => {
+                if (nextStep.view && canView(actingRole, nextStep.view)) setView(nextStep.view);
+                setNextStep(null);
+              }}>{nextStep.label}</button>
+              <button className="nextstep-later" onClick={() => setNextStep(null)}>Later</button>
+            </div>
+          </div>
+          <button className="nextstep-x" aria-label="Dismiss" onClick={() => setNextStep(null)}>×</button>
+        </div>
       )}
       <Toast toast={toast} />
     </div>
@@ -392,6 +419,10 @@ function MasterFormModal({ entity, id, db, onClose, refresh, notify }) {
       if (id) await api[entity].update(id, form); else await api[entity].create(form);
       await refresh([entity]);
       notify(id ? `${sc.sing} updated.` : `${sc.sing} created.`);
+      if (!id) {
+        const NS = { companies: 'companyCreated', assets: 'assetCreated', blocks: 'blockCreated', units: 'unitCreated', customers: 'customerCreated', brands: 'brandCreated', brokers: 'brokerCreated' };
+        if (NS[entity]) suggestNextStep(NS[entity]);
+      }
       onClose();
     } catch (e) { notify(e.message, true); }
   };
@@ -1279,6 +1310,7 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
       if (id) await api.leases.update(id, form); else await api.leases.create(form);
       await refresh(['leases', 'units']);
       notify(id ? 'Lease updated.' : 'Lease created.');
+      suggestNextStep(id ? 'leaseUpdated' : 'leaseCreated');
       onClose();
     } catch (e) { notify(e.message, true); }
   };
@@ -1329,6 +1361,7 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
         ))}
       </div>
       <div className="lease-form">
+        <div className="wiz-pane" key={step}>
 
         {step === 0 && (
           <div className="form-section">
@@ -1428,6 +1461,7 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
           </>
         )}
 
+        </div>
       </div>
     </Modal>
   );
@@ -1515,6 +1549,7 @@ function LeaseStageModal({ id, db, onClose, refresh, notify }) {
       await api.leases.setStage(id, stage, remarks);
       await refresh(['leases']);
       notify(`${lease.code} moved to '${stage}'.`);
+      if (stage === 'Active') suggestNextStep('stageActive');
       onClose();
     } catch (e) { notify(e.message, true); }
   };
@@ -1558,6 +1593,7 @@ function CreditNoteModal({ invoice, onClose, refresh, notify }) {
       const r = await api.creditNotes.create({ invoiceId: invoice.id, amount: Number(amount), reason, noteType });
       await refresh(['invoices']);
       notify(`${noteType} note ${r.no} issued for ₹${r.total.toLocaleString('en-IN')} (incl. GST).`);
+      suggestNextStep('creditNoteIssued');
       onClose();
     } catch (e) { notify(e.message, true); }
     finally { setBusy(false); }
@@ -1743,7 +1779,7 @@ function GenerateInvoiceModal({ db, onClose, refresh, notify }) {
       } else {
         const res = await api.invoices.generate(ym, scope);
         await refresh(['invoices']);
-        if (res.count) notify(`${res.count} invoice(s) generated for ${ymLabel(ym)}.`);
+        if (res.count) { notify(`${res.count} invoice(s) generated for ${ymLabel(ym)}.`); suggestNextStep('invoicesGenerated'); }
         else if (res.errors && res.errors.length) notify(`0 generated — ${res.errors[0].error}`, true);
         else if (res.reason) notify(res.reason, true);
         else notify(`No new invoices (scanned ${res.scanned ?? '?'} leases — already generated or nothing billable).`);
@@ -2101,6 +2137,7 @@ function RenewLeaseModal({ id, db, onClose, refresh, notify }) {
       const r = await api.leases.renew(id, { startDate, months: Number(months), mg: Number(mg) });
       await refresh(['leases', 'units', 'invoices']);
       notify(`Renewed as ${r.code} — ${fmtDate(r.startDate)} → ${fmtDate(r.endDate)} at MG ₹${Number(r.mg).toLocaleString('en-IN')}.`);
+      suggestNextStep('leaseRenewed');
       onClose();
     } catch (e) { notify(e.message, true); }
     finally { setBusy(false); }
@@ -2140,6 +2177,7 @@ function ExitLeaseModal({ id, db, onClose, refresh, notify }) {
       const r = await api.leases.exit(id, { exitDate, remarks, deductions: ded.filter((d) => Number(d.amount) > 0) });
       await refresh(['leases', 'units', 'invoices']);
       notify(`Exit settled: refund ${r.netRefund >= 0 ? '₹' + r.netRefund.toLocaleString('en-IN') + ' payable to tenant' : '₹' + Math.abs(r.netRefund).toLocaleString('en-IN') + ' recoverable from tenant'}. Unit is now vacant.`);
+      suggestNextStep('leaseExited');
       onClose();
     } catch (e) { notify(e.message, true); }
     finally { setBusy(false); }
@@ -2306,6 +2344,7 @@ function SdAdjustModal({ id, db, onClose, refresh, notify }) {
       const res = await api.invoices.sdAdjust(id, Number(amt), note);
       await refresh(['invoices', 'collections']);
       notify(`SD adjustment of ${money0(res.adjAmt)} applied.`);
+      suggestNextStep('sdAdjusted');
       onClose();
     } catch (e) { notify(e.message, true); }
     finally { setBusy(false); }
@@ -2447,6 +2486,7 @@ function CollectionFormModal({ invoiceId, db, onClose, refresh, notify }) {
       await api.collections.create({ invoiceId: invId, date, amount: +amount, tdsPct: +tdsPct, instrument: mode, ref: ref.trim() });
       await refresh(['collections', 'invoices']);
       notify('Collection captured.');
+      suggestNextStep('collectionSaved');
       onClose();
     } catch (e) { notify(e.message, true); }
   };

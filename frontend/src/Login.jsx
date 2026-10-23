@@ -78,13 +78,13 @@ export default function Login({ onLogin }) {
         <div className="login2-tag">
           <h2>Every unit, every deed, every rupee — in one register.</h2>
           <p>From site plan to signed deed to GST-compliant invoice: the leasing
-             lifecycle of our commercial assets, managed end to end with the
+             lifecycle of your commercial assets, managed end to end with the
              reconciliations finance signs off on.</p>
         </div>
-        <div className="login2-stats">
-          <div><b>199</b><span>units on register</span></div>
-          <div><b>42</b><span>live leases</span></div>
-          <div><b>12</b><span>Excel reports</span></div>
+        <div className="login2-caps">
+          <span>GST-compliant invoicing</span>
+          <span>Security-deposit reconciliation</span>
+          <span>One-click Excel reports</span>
         </div>
         <SitePlan />
       </div>
