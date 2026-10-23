@@ -4,12 +4,14 @@ const { uid, nextNo, monthRange, irnHex, round2 } = require('../lib/helpers');
 const { genLeaseInvoices, gstSplit } = require('../lib/billing');
 const router = express.Router();
 
-function mapInvoice(r, paid) {
+function mapInvoice(r, paid, credited) {
   const total = Number(r.Total);
   const p = Number(paid) || 0;
+  const cr = Number(credited) || 0; // credit notes net of debit notes
+  const settled = p + cr;
   let status = 'Unpaid';
-  if (p <= 0) status = 'Unpaid';
-  else if (p + 0.5 >= total) status = 'Paid';
+  if (settled <= 0) status = 'Unpaid';
+  else if (settled + 0.5 >= total) status = 'Paid';
   else status = 'Partial';
   return {
     id: r.Id, no: r.No, type: r.Type, leaseId: r.LeaseId, brandId: r.BrandId, unitId: r.UnitId, ym: r.Ym,
@@ -17,8 +19,8 @@ function mapInvoice(r, paid) {
     cgstAmt: Number(r.CgstAmt || 0), sgstAmt: Number(r.SgstAmt || 0), igstAmt: Number(r.IgstAmt || 0),
     hsnCode: r.HsnCode || '997212', paymentTermsDays: r.PaymentTermsDays || 7,
     ackNo: r.AckNo || null, ackDate: r.AckDate ? new Date(r.AckDate).toISOString() : null, placeOfSupply: r.PlaceOfSupply || 'HARYANA',
-    total, dueDate: r.DueDate.toISOString().slice(0, 10), irn: r.Irn, paid: p,
-    balance: round2(total - p), status, poolGroupId: r.PoolGroupId || null
+    total, dueDate: r.DueDate.toISOString().slice(0, 10), irn: r.Irn, paid: p, credited: cr,
+    balance: round2(total - p - cr), status, poolGroupId: r.PoolGroupId || null
   };
 }
 
@@ -26,10 +28,11 @@ router.get('/', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
-      SELECT i.*, ISNULL(c.paid,0) AS Paid FROM ${SCHEMA}.Invoices i
+      SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i
       OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
+      OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) AS credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn
       ORDER BY i.DueDate DESC`);
-    res.json(result.recordset.map(r => mapInvoice(r, r.Paid)));
+    res.json(result.recordset.map(r => mapInvoice(r, r.Paid, r.Credited)));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -38,8 +41,9 @@ router.get('/:id/print', async (req, res) => {
   try {
     const pool = await getPool();
     const invRow = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`
-      SELECT i.*, ISNULL(c.paid,0) AS Paid FROM ${SCHEMA}.Invoices i
+      SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i
       OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
+      OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) AS credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn
       WHERE i.Id=@id`);
     if (!invRow.recordset.length) return res.status(404).json({ error: 'Invoice not found' });
     const inv = invRow.recordset[0];
@@ -56,7 +60,7 @@ router.get('/:id/print', async (req, res) => {
     const company = compRow ? compRow.recordset[0] : null;
 
     res.json({
-      invoice: mapInvoice(inv, inv.Paid),
+      invoice: mapInvoice(inv, inv.Paid, inv.Credited),
       landlord: {
         name: lease?.LessorName || asset?.LandlordName || asset?.Name,
         address: lease?.LessorAddress || asset?.LandlordAddress,
@@ -85,10 +89,10 @@ router.post('/:id/sd-adjust', async (req, res) => {
     const { sdAdjAmt, note } = req.body;
     if (!sdAdjAmt || Number(sdAdjAmt) <= 0) return res.status(400).json({ error: 'Enter a valid SD adjustment amount.' });
     const invRow = await pool.request().input('id', sql.VarChar(40), req.params.id)
-      .query(`SELECT i.*, ISNULL(c.paid,0) AS Paid FROM ${SCHEMA}.Invoices i OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c WHERE i.Id=@id`);
+      .query(`SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) AS credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn WHERE i.Id=@id`);
     const inv = invRow.recordset[0];
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-    const balance = round2(Number(inv.Total) - Number(inv.Paid));
+    const balance = round2(Number(inv.Total) - Number(inv.Paid) - Number(inv.Credited));
     const adjAmt = Math.min(Number(sdAdjAmt), balance);
     if (adjAmt <= 0) return res.status(400).json({ error: 'Invoice is already fully settled.' });
     const id = uid();
@@ -114,7 +118,7 @@ router.post('/generate', async (req, res) => {
     const { ym, scope } = req.body;
     let leases;
     if (scope === 'all') {
-      const r = await pool.request().query(`SELECT Id FROM ${SCHEMA}.Leases WHERE UPPER(LTRIM(RTRIM(Status)))='ACTIVE' AND ISNULL(OnHold,0)=0`);
+      const r = await pool.request().query(`SELECT Id FROM ${SCHEMA}.Leases WHERE UPPER(LTRIM(RTRIM(Status)))='ACTIVE' AND ISNULL(OnHold,0)=0 AND ISNULL(LifecycleStage,'Active')='Active'`);
       leases = r.recordset.map(x => x.Id);
     } else {
       const r = await pool.request().input('id', sql.VarChar(40), scope).query(`SELECT Id FROM ${SCHEMA}.Leases WHERE Id=@id AND ISNULL(OnHold,0)=0`);
@@ -137,14 +141,15 @@ router.post('/generate', async (req, res) => {
     if (count === 0 && scope !== 'all' && leases.length === 1 && !errors.length) {
       // Explain exactly why this single lease produced nothing
       const lr = await pool.request().input('id', sql.VarChar(40), leases[0]).input('ym', sql.Char(7), ym)
-        .query(`SELECT l.Code, l.RentalType, l.Mg, l.MgBasis, l.Cam, l.Utility, u.BuiltupArea,
+        .query(`SELECT l.Code, l.RentalType, l.Mg, l.MgBasis, l.Cam, l.Utility, l.LifecycleStage, u.BuiltupArea,
           (SELECT COUNT(*) FROM ${SCHEMA}.Invoices i WHERE i.LeaseId=l.Id AND i.Ym=@ym AND i.Type='MG') AS MgBilled
           FROM ${SCHEMA}.Leases l JOIN ${SCHEMA}.Units u ON u.Id=l.UnitId WHERE l.Id=@id`)
         .catch(() => null);
       const row = lr && lr.recordset[0];
       if (row) {
         const computedMg = row.MgBasis === 'PerSqFt' ? Number(row.Mg) * Number(row.BuiltupArea || 0) : Number(row.Mg);
-        if (row.MgBilled > 0) reason = `${row.Code}: ${ym} is already billed for this lease.`;
+        if ((row.LifecycleStage || 'Active') !== 'Active') reason = `${row.Code}: lease is in '${row.LifecycleStage}' stage — billing starts at the 'Active' stage.`;
+        else if (row.MgBilled > 0) reason = `${row.Code}: ${ym} is already billed for this lease.`;
         else if (['MG', 'MGvsRS'].includes(row.RentalType) && computedMg <= 0) reason = `${row.Code}: MG rate is 0 — set the MG value on the lease first.`;
         else if (!['MG', 'MGvsRS'].includes(row.RentalType)) reason = `${row.Code}: ${row.RentalType} lease — bills only after sales are entered for ${ym}.`;
         else reason = `${row.Code}: nothing billable for ${ym}.`;

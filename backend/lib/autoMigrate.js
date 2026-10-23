@@ -46,7 +46,63 @@ const BASE_COLUMNS = [
   // ── Units: detail fields from the commercial working file ──
   ['Units', 'UnitType', 'NVARCHAR(30) NULL'],
   ['Units', 'Plc', 'NVARCHAR(80) NULL'],
-  ['Units', 'CoveredArea', 'DECIMAL(18,2) NULL']
+  ['Units', 'CoveredArea', 'DECIMAL(18,2) NULL'],
+  // ── v3: separated masters & lifecycle ──
+  ['Units', 'CustomerId', 'VARCHAR(40) NULL'],
+  ['Leases', 'BrokerId', 'VARCHAR(40) NULL'],
+  ['Leases', 'LifecycleStage', "VARCHAR(30) NOT NULL DEFAULT 'Active'"],
+  ['Brands', 'LesseeCompanyNote', 'NVARCHAR(300) NULL']
+];
+
+// v3 tables — created when missing (idempotent)
+const TABLES = [
+  ['Customers', `CREATE TABLE {S}.Customers(
+      Id VARCHAR(40) PRIMARY KEY,
+      Code VARCHAR(20) UNIQUE NOT NULL,
+      Name NVARCHAR(250) NOT NULL,
+      CustType VARCHAR(20) NOT NULL DEFAULT 'Individual',
+      PanNo NVARCHAR(20) NULL, Gstin NVARCHAR(20) NULL,
+      Phone NVARCHAR(30) NULL, Email NVARCHAR(150) NULL,
+      Address NVARCHAR(500) NULL,
+      BankName NVARCHAR(150) NULL, BankAcc NVARCHAR(60) NULL, BankIfsc NVARCHAR(20) NULL,
+      Nri BIT NOT NULL DEFAULT 0, Remarks NVARCHAR(500) NULL,
+      Active VARCHAR(20) NOT NULL DEFAULT 'Active')`],
+  ['Brokers', `CREATE TABLE {S}.Brokers(
+      Id VARCHAR(40) PRIMARY KEY,
+      Code VARCHAR(20) UNIQUE NOT NULL,
+      Name NVARCHAR(250) NOT NULL,
+      Firm NVARCHAR(250) NULL, PanNo NVARCHAR(20) NULL, Gstin NVARCHAR(20) NULL,
+      Phone NVARCHAR(30) NULL, Email NVARCHAR(150) NULL,
+      ReraNo NVARCHAR(100) NULL, Remarks NVARCHAR(500) NULL,
+      Active VARCHAR(20) NOT NULL DEFAULT 'Active')`],
+  ['CreditNotes', `CREATE TABLE {S}.CreditNotes(
+      Id VARCHAR(40) PRIMARY KEY,
+      No VARCHAR(20) UNIQUE NOT NULL,
+      InvoiceId VARCHAR(40) NOT NULL,
+      NoteType VARCHAR(10) NOT NULL DEFAULT 'Credit',
+      NoteDate DATE NOT NULL,
+      Amount DECIMAL(18,2) NOT NULL,
+      GstAmt DECIMAL(18,2) NOT NULL DEFAULT 0,
+      Total DECIMAL(18,2) NOT NULL,
+      Reason NVARCHAR(400) NULL,
+      CreatedBy NVARCHAR(150) NULL)`],
+  ['LeaseDocs', `CREATE TABLE {S}.LeaseDocs(
+      Id VARCHAR(40) PRIMARY KEY,
+      LeaseId VARCHAR(40) NOT NULL,
+      DocType NVARCHAR(60) NULL,
+      FileName NVARCHAR(300) NOT NULL,
+      StoredName NVARCHAR(300) NOT NULL,
+      SizeBytes BIGINT NULL,
+      UploadedBy NVARCHAR(150) NULL,
+      UploadedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
+  ['LeaseStageLog', `CREATE TABLE {S}.LeaseStageLog(
+      Id VARCHAR(40) PRIMARY KEY,
+      LeaseId VARCHAR(40) NOT NULL,
+      FromStage VARCHAR(30) NULL,
+      ToStage VARCHAR(30) NOT NULL,
+      ChangedBy NVARCHAR(150) NULL,
+      Remarks NVARCHAR(400) NULL,
+      ChangedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`]
 ];
 
 // Every extended lease field from leaseFields.js is also ensured, so a new
@@ -80,6 +136,44 @@ async function autoMigrate(pool, sql, SCHEMA) {
       console.error(`[autoMigrate] ${SCHEMA}.${table}.${col}: ${e.message}`);
     }
   }
+  // v3 tables
+  for (const [name, ddl] of TABLES) {
+    try {
+      const r = await pool.request().query(`SELECT OBJECT_ID('${SCHEMA}.${name}','U') AS oid`);
+      if (r.recordset[0].oid == null) {
+        await pool.request().query(ddl.replace(/\{S\}/g, SCHEMA));
+        console.log(`[autoMigrate] created table ${SCHEMA}.${name}`);
+        added++;
+      }
+    } catch (e) { failed++; console.error(`[autoMigrate] table ${SCHEMA}.${name}:`, e.message); }
+  }
+  // One-time: promote free-text Unit.Owner into the Customers master and link units.
+  try {
+    const pending = await pool.request().query(`
+      SELECT COUNT(*) c FROM ${SCHEMA}.Units
+      WHERE ISNULL(Owner,'') <> '' AND CustomerId IS NULL`);
+    if (pending.recordset[0].c > 0) {
+      await pool.request().query(`
+        ;WITH names AS (
+          SELECT DISTINCT LTRIM(RTRIM(Owner)) AS Nm FROM ${SCHEMA}.Units
+          WHERE ISNULL(Owner,'') <> ''
+        )
+        INSERT INTO ${SCHEMA}.Customers (Id, Code, Name, CustType)
+        SELECT LOWER(REPLACE(CONVERT(VARCHAR(36), NEWID()),'-','')),
+               'CUS-' + RIGHT('0000' + CAST(ROW_NUMBER() OVER (ORDER BY n.Nm)
+                 + ISNULL((SELECT MAX(CAST(SUBSTRING(Code,5,10) AS INT)) FROM ${SCHEMA}.Customers WHERE Code LIKE 'CUS-%'),0) AS VARCHAR(10)), 4),
+               n.Nm,
+               CASE WHEN n.Nm LIKE 'M/s%' OR n.Nm LIKE '%Ltd%' OR n.Nm LIKE '%Limited%' OR n.Nm LIKE '%LLP%' THEN 'Company' ELSE 'Individual' END
+        FROM names n
+        WHERE NOT EXISTS (SELECT 1 FROM ${SCHEMA}.Customers c WHERE c.Name = n.Nm)`);
+      await pool.request().query(`
+        UPDATE u SET u.CustomerId = c.Id
+        FROM ${SCHEMA}.Units u
+        JOIN ${SCHEMA}.Customers c ON c.Name = LTRIM(RTRIM(u.Owner))
+        WHERE ISNULL(u.Owner,'') <> '' AND u.CustomerId IS NULL`);
+      console.log('[autoMigrate] promoted Unit.Owner text into Customers master and linked units');
+    }
+  } catch (e) { failed++; console.error('[autoMigrate] customer promotion:', e.message); }
   // Settings key-value table
   try {
     await pool.request().query(`IF OBJECT_ID('${SCHEMA}.Settings','U') IS NULL

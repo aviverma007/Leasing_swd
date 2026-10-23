@@ -47,9 +47,13 @@ export const api = {
   units: crud('/units'),
   brands: crud('/brands'),
   users: crud('/users'),
+  customers: crud('/customers'),
+  brokers: crud('/brokers'),
   leases: {
     ...crud('/leases'),
     hold: (id, remarks) => req('POST', `/leases/${id}/hold`, { remarks }),
+    setStage: (id, stage, remarks) => req('POST', `/leases/${id}/stage`, { stage, remarks }),
+    stageLog: (id) => req('GET', `/leases/${id}/stage-log`),
     setAlerts: (id, enabled) => req('POST', `/leases/${id}/alerts`, { enabled }),
     release: (id) => req('POST', `/leases/${id}/release`)
   },
@@ -63,6 +67,27 @@ export const api = {
     sdAdjust: (id, sdAdjAmt, note) => req('POST', `/invoices/${id}/sd-adjust`, { sdAdjAmt, note })
   },
   collections: crud('/collections'),
+  creditNotes: {
+    list: () => req('GET', '/credit-notes'),
+    create: (body) => req('POST', '/credit-notes', body)
+  },
+  ledger: (brandId) => req('GET', `/ledger/${brandId}`),
+  leaseDocs: {
+    list: (leaseId) => req('GET', `/lease-docs/${leaseId}`),
+    remove: (leaseId, docId) => req('DELETE', `/lease-docs/${leaseId}/file/${docId}`),
+    downloadUrl: (leaseId, docId) => `/api/lease-docs/${leaseId}/file/${docId}`,
+    upload: async (leaseId, file, docType) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('docType', docType || 'Other');
+      const res = await fetch(`/api/lease-docs/${leaseId}`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + getToken() }, body: fd
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      return data;
+    }
+  },
   investorUnits: {
     ...crud('/investor-units'),
     approve: (id, actingRole) => req('POST', `/investor-units/${id}/approve`, { actingRole })

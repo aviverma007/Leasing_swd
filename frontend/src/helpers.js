@@ -82,7 +82,8 @@ export const MASTER_SCHEMA = {
       { k: 'carpetArea', l: 'Carpet area (sq ft)', type: 'number', ph: '2200' },
       { k: 'coveredArea', l: 'Covered area (sq ft)', type: 'number', ph: '2400' },
       { k: 'builtupArea', l: 'Super/Built-up area (sq ft)', type: 'number', ph: '2600' },
-      { k: 'owner', l: 'Owner (customer)', ph: 'Unit owner name' }
+      { k: 'customerId', l: 'Owner (from Customer master)', ref: 'customers' },
+      { k: 'owner', l: 'Owner name (legacy text — prefer the dropdown)', ph: 'Unit owner name' }
     ],
     head: ['Code', 'Unit', 'Type', 'PLC', 'Carpet', 'Covered', 'Super', 'Status'],
     cols: (r, db) => [r.code, r.name, r.unitType || '—', r.plc || '—', (+r.carpetArea || 0).toLocaleString('en-IN'), (+r.coveredArea || 0).toLocaleString('en-IN'), (+r.builtupArea || 0).toLocaleString('en-IN'), r.status]
@@ -120,6 +121,44 @@ export const MASTER_SCHEMA = {
         r.securityDeposit ? (+r.securityDeposit).toLocaleString('en-IN') : '—'];
     }
   },
+  customers: {
+    sing: 'Customer',
+    fields: [
+      { k: 'name', l: 'Customer name', req: 1, ph: 'Mr. Nishant Aggarwal' },
+      { k: 'custType', l: 'Type', type: 'select', opts: ['Individual', 'Company', 'HUF', 'Partnership', 'Trust'] },
+      { k: 'panNo', l: 'PAN', ph: 'AAAPA1234A' },
+      { k: 'gstin', l: 'GSTIN (if registered)', ph: '06AAAPA1234A1ZX' },
+      { k: 'phone', l: 'Phone', ph: '98xxxxxxxx' },
+      { k: 'email', l: 'Email', ph: 'name@mail.com' },
+      { k: 'address', l: 'Address', type: 'textarea' },
+      { k: 'bankName', l: 'Bank name', ph: 'HDFC Bank' },
+      { k: 'bankAcc', l: 'Account number' },
+      { k: 'bankIfsc', l: 'IFSC' },
+      { k: 'nri', l: 'NRI', type: 'select', opts: ['No', 'Yes'] },
+      { k: 'remarks', l: 'Remarks', type: 'textarea' },
+      { k: 'active', l: 'Status', type: 'select', opts: ['Active', 'Inactive'] }
+    ],
+    head: ['Code', 'Customer', 'Type', 'PAN', 'Phone', 'Units Owned', 'Status'],
+    cols: (r, db) => [r.code, r.name, r.custType || '—', r.panNo || '—', r.phone || '—',
+      (db.units || []).filter((u) => u.customerId === r.id).map((u) => u.name).join(', ') || '—', r.active]
+  },
+  brokers: {
+    sing: 'Broker',
+    fields: [
+      { k: 'name', l: 'Broker name', req: 1, ph: 'Rahul Khanna' },
+      { k: 'firm', l: 'Firm / agency', ph: 'Khanna Estates' },
+      { k: 'panNo', l: 'PAN' },
+      { k: 'gstin', l: 'GSTIN' },
+      { k: 'phone', l: 'Phone' },
+      { k: 'email', l: 'Email' },
+      { k: 'reraNo', l: 'RERA registration no' },
+      { k: 'remarks', l: 'Remarks', type: 'textarea' },
+      { k: 'active', l: 'Status', type: 'select', opts: ['Active', 'Inactive'] }
+    ],
+    head: ['Code', 'Broker', 'Firm', 'Phone', 'Leases', 'Status'],
+    cols: (r, db) => [r.code, r.name, r.firm || '—', r.phone || '—',
+      (db.leases || []).filter((l) => l.brokerId === r.id).length || '—', r.active]
+  },
   users: {
     sing: 'User',
     fields: [
@@ -132,6 +171,8 @@ export const MASTER_SCHEMA = {
     cols: (r) => [r.code, r.email, r.role, r.active, r.pwdChangedAt ? ('Set · ' + new Date(r.pwdChangedAt).toLocaleDateString('en-GB')) : 'Set (legacy)']
   }
 };
+
+export const LIFECYCLE_STAGES = ['Enquiry', 'LOI', 'NFA Approval', 'Agreement', 'Fitout', 'Handover', 'Active', 'Expired', 'Renewed', 'Exited'];
 
 export const RENTAL_TYPES = [
   ['MG', 'MG only (lumpsum / per sq ft)'],
@@ -156,6 +197,8 @@ export const NAV = [
   { v: 'blocks', label: 'Block' },
   { v: 'units', label: 'Unit' },
   { v: 'brands', label: 'Brand' },
+  { v: 'customers', label: 'Customer' },
+  { v: 'brokers', label: 'Broker' },
   { v: 'users', label: 'User' },
   { grp: 'Leasing & Billing' },
   { v: 'leases', label: 'Leases' },
@@ -163,6 +206,7 @@ export const NAV = [
   { v: 'invoices', label: 'Invoices' },
   { v: 'collections', label: 'Collections' },
   { v: 'collectionmaster', label: 'Collection Master' },
+  { v: 'ledger', label: 'Tenant Ledger' },
   { grp: 'Rent Disbursement' },
   { v: 'investors', label: 'Investor Units' },
   { v: 'investoraccounts', label: 'Investor Accounts' },
@@ -182,16 +226,19 @@ export const PAGES = {
   home: { t: 'Smart Leasing', s: 'Commercial leasing, billing & analytics — Smart World Developers' },
   dashboard: { t: 'Dashboard', s: 'Portfolio, billing and disbursement at a glance' },
   inventory: { t: 'Inventory', s: 'Units by project, block and floor with occupancy status' },
-  companies: { t: 'Company Master', s: 'Legal entities that own brands' },
+  companies: { t: 'Lessee Company Master', s: 'Tenant legal entities (lessees) — a company can run multiple brands' },
   assets: { t: 'Project Master', s: 'Properties under management' },
   blocks: { t: 'Block Master', s: 'Wings/blocks within an asset' },
   units: { t: 'Unit Master', s: 'Leasable units with carpet & built-up area' },
   brands: { t: 'Brand Master', s: 'Tenant brands, categories and the project(s) each operates in' },
+  customers: { t: 'Customer Master', s: 'Unit owners & investors — KYC, PAN/GSTIN, bank details, units owned' },
+  brokers: { t: 'Broker Master', s: 'Channel partners with RERA registration and lease count' },
   users: { t: 'User Master', s: 'Panel users and role hierarchy' },
   leases: { t: 'Leases', s: 'Rental structures: MG, revenue share, CAM & utility' },
   sales: { t: 'Sales — Revenue Share', s: "Monthly brand sales that drive revenue-share billing" },
   invoices: { t: 'Invoices', s: 'MG / Rev-share / CAM / Utility & ad-hoc, with e-invoice IRN + QR' },
   collections: { t: 'Collections', s: 'Invoice-wise receipts with TDS and instrument' },
+  ledger: { t: 'Tenant Ledger (SOA)', s: 'Per-tenant statement of account — invoices, credit notes, receipts, running balance' },
   collectionmaster: { t: 'Collection Master', s: 'Invoiced, collected and outstanding — reconciled per brand & unit' },
   investors: { t: 'Investor Units', s: "Investor ownership, disbursement % & bank details (maker-checker)" },
   investoraccounts: { t: 'Investor Accounts', s: 'Rent collected, distributed and pending per investor' },

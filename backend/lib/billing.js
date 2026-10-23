@@ -1,8 +1,22 @@
 const { sql, SCHEMA } = require('../db');
 const { uid, nextNo, monthRange, round2, irnHex } = require('./helpers');
 
-function mgAmount(lease, unit) {
-  return lease.MgBasis === 'PerSqFt' ? (Number(lease.Mg) || 0) * (Number(unit.BuiltupArea) || 0) : (Number(lease.Mg) || 0);
+function mgAmount(lease, unit, ym) {
+  const base = lease.MgBasis === 'PerSqFt' ? (Number(lease.Mg) || 0) * (Number(unit.BuiltupArea) || 0) : (Number(lease.Mg) || 0);
+  return round2(base * escFactor(lease, ym));
+}
+
+/* Escalation: Esc % applied on each completed lease anniversary before the billing month. */
+function escFactor(lease, ym) {
+  const esc = Number(lease.Esc) || 0;
+  if (esc <= 0 || !ym || !lease.StartDate) return 1;
+  const start = new Date(lease.StartDate);
+  const billMonth = new Date(ym + '-01T00:00:00Z');
+  let years = billMonth.getUTCFullYear() - start.getUTCFullYear();
+  const annivThisYear = new Date(Date.UTC(billMonth.getUTCFullYear(), start.getUTCMonth(), 1));
+  if (billMonth < annivThisYear) years -= 1;
+  if (years <= 0) return 1;
+  return Math.pow(1 + esc / 100, years);
 }
 
 /* GST bifurcation: intra-state → CGST+SGST; inter-state → IGST */
@@ -65,7 +79,7 @@ async function genLeaseInvoices(pool, leaseId, ym) {
   const { s: due } = monthRange(ym);
   let made = 0;
   if (['MG', 'MGvsRS'].includes(lease.RentalType) && !(await invoiceExists(pool, leaseId, ym, 'MG'))) {
-    made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}`, mgAmount(lease, unit), ym, due);
+    made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}`, mgAmount(lease, unit, ym), ym, due);
   }
   if (Number(lease.Cam) > 0 && !(await invoiceExists(pool, leaseId, ym, 'CAM'))) {
     made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${ym}`, Number(lease.Cam) * Number(unit.BuiltupArea), ym, due);
@@ -86,7 +100,7 @@ async function syncRevShare(pool, leaseId, ym) {
   const sales = saleRow.recordset[0] ? Number(saleRow.recordset[0].Amount) : 0;
   const rs = sales * Number(lease.RevSharePct) / 100;
   let billable = rs;
-  if (lease.RentalType === 'MGvsRS') billable = Math.max(0, rs - mgAmount(lease, unit));
+  if (lease.RentalType === 'MGvsRS') billable = Math.max(0, rs - mgAmount(lease, unit, ym));
   const existingRow = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym)
     .query(`SELECT * FROM ${SCHEMA}.Invoices WHERE LeaseId=@l AND Ym=@y AND Type='RevShare'`);
   const existing = existingRow.recordset[0];
@@ -128,4 +142,4 @@ async function rentCollectedForUnit(pool, unitId, ym) {
   return Number(row.recordset[0].total) || 0;
 }
 
-module.exports = { mgAmount, gstSplit, genLeaseInvoices, syncRevShare, rentCollectedForUnit, getLease, getUnit };
+module.exports = { mgAmount, escFactor, gstSplit, genLeaseInvoices, syncRevShare, rentCollectedForUnit, getLease, getUnit };

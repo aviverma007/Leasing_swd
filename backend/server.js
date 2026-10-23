@@ -42,6 +42,15 @@ app.use('/api/reports', requireModule('reports'), require('./routes/reports'));
 // Alerts available to any authenticated user (no module gate — dashboard widget)
 app.get('/api/alerts', async (req, res) => { require('./routes/reports').handle ? require('./routes/reports').handle(req, res) : res.json({}); });
 
+// masters: customers & brokers (v3 separated masters)
+app.use('/api/customers', requireModule('units'), mastersRouter('customers'));
+app.use('/api/brokers', requireModule('brands'), mastersRouter('brokers'));
+
+// credit/debit notes, tenant ledger, lease document vault
+app.use('/api/credit-notes', requireModule('invoices'), require('./routes/creditNotes'));
+app.use('/api/ledger', requireModule('invoices'), require('./routes/ledger'));
+app.use('/api/lease-docs', requireModule('leases'), require('./routes/documents'));
+
 // deletion approval queue (route enforces admin-only for approve/reject internally)
 app.use('/api/deletion-requests', require('./routes/deletionRequests'));
 

@@ -41,7 +41,7 @@ export const ACCESS = {
 
 export const APPROVER_ROLES = ['Admin', 'Finance Head', 'Center/Portfolio Head'];
 
-const MODULE_ALIAS = { home: 'dashboard', gstrecon: 'reports', tdsrecon: 'reports', agreementrecon: 'reports', sdrecon: 'reports', reportcenter: 'reports' };
+const MODULE_ALIAS = { home: 'dashboard', customers: 'units', brokers: 'brands', ledger: 'collectionmaster', gstrecon: 'reports', tdsrecon: 'reports', agreementrecon: 'reports', sdrecon: 'reports', reportcenter: 'reports' };
 
 export function accessFor(role, module) {
   const r = ACCESS[role];

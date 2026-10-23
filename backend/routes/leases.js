@@ -24,6 +24,7 @@ function mapLease(r) {
     cam: Number(r.Cam), utility: Number(r.Utility), esc: Number(r.Esc), deposit: Number(r.Deposit),
     gst: Number(r.Gst), onHold: !!r.OnHold, holdRemarks: r.HoldRemarks, status: r.Status,
     alertsEnabled: r.AlertsEnabled == null ? true : !!r.AlertsEnabled,
+    lifecycleStage: r.LifecycleStage || 'Active',
     ...mapExtra(r)
   };
 }
@@ -157,6 +158,38 @@ router.post('/:id/alerts', async (req, res) => {
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('en', sql.Bit, enabled)
       .query(`UPDATE ${SCHEMA}.Leases SET AlertsEnabled=@en WHERE Id=@id`);
     res.json({ id: req.params.id, alertsEnabled: !!enabled });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Lease lifecycle stage — stage-wise pipeline with an audit log */
+const STAGES = ['Enquiry', 'LOI', 'NFA Approval', 'Agreement', 'Fitout', 'Handover', 'Active', 'Expired', 'Renewed', 'Exited'];
+router.post('/:id/stage', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const { stage, remarks } = req.body;
+    if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Invalid stage. Allowed: ' + STAGES.join(', ') });
+    const cur = await pool.request().input('id', sql.VarChar(40), req.params.id)
+      .query(`SELECT LifecycleStage FROM ${SCHEMA}.Leases WHERE Id=@id`);
+    if (!cur.recordset.length) return res.status(404).json({ error: 'Lease not found' });
+    const from = cur.recordset[0].LifecycleStage || 'Active';
+    await pool.request().input('id', sql.VarChar(40), req.params.id).input('st', sql.VarChar(30), stage)
+      .query(`UPDATE ${SCHEMA}.Leases SET LifecycleStage=@st WHERE Id=@id`);
+    await pool.request()
+      .input('lid', sql.VarChar(40), uid()).input('l', sql.VarChar(40), req.params.id)
+      .input('f', sql.VarChar(30), from).input('t', sql.VarChar(30), stage)
+      .input('by', sql.NVarChar(150), req.user ? (req.user.email || req.user.username || 'system') : 'system')
+      .input('rm', sql.NVarChar(400), (remarks || '').slice(0, 400))
+      .query(`INSERT INTO ${SCHEMA}.LeaseStageLog (Id,LeaseId,FromStage,ToStage,ChangedBy,Remarks) VALUES (@lid,@l,@f,@t,@by,@rm)`);
+    res.json({ id: req.params.id, lifecycleStage: stage });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/:id/stage-log', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('l', sql.VarChar(40), req.params.id)
+      .query(`SELECT * FROM ${SCHEMA}.LeaseStageLog WHERE LeaseId=@l ORDER BY ChangedAt DESC`);
+    res.json(r.recordset.map(x => ({ from: x.FromStage, to: x.ToStage, by: x.ChangedBy, remarks: x.Remarks, at: new Date(x.ChangedAt).toISOString() })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

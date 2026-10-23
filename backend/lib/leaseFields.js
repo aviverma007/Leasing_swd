@@ -76,6 +76,7 @@ const LEASE_FIELDS = [
   ['dealWith', 'DealWith', 'str', 150],
   ['billingRemarks', 'BillingRemarks', 'str', 1000],
   ['category', 'Category', 'str', 80],
+  ['brokerId', 'BrokerId', 'str', 40],
   // Billing config (persists the Billing Config tab)
   ['hsnCode', 'HsnCode', 'str', 20],
   ['paymentTermsDays', 'PaymentTermsDays', 'int'],

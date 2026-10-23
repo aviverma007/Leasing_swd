@@ -28,8 +28,8 @@ const ENTITIES = {
   },
   units: {
     table: 'Units', prefix: 'UNT',
-    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status', 'Owner', 'UnitType', 'Plc', 'CoveredArea'],
-    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status, owner: r.Owner, unitType: r.UnitType, plc: r.Plc, coveredArea: r.CoveredArea })
+    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status', 'Owner', 'UnitType', 'Plc', 'CoveredArea', 'CustomerId'],
+    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status, owner: r.Owner, unitType: r.UnitType, plc: r.Plc, coveredArea: r.CoveredArea, customerId: r.CustomerId })
   },
   brands: {
     table: 'Brands', prefix: 'BRD',
@@ -45,6 +45,24 @@ const ENTITIES = {
       }
       return o;
     }
+  },
+  customers: {
+    table: 'Customers', prefix: 'CUS',
+    cols: ['Name', 'CustType', 'PanNo', 'Gstin', 'Phone', 'Email', 'Address', 'BankName', 'BankAcc', 'BankIfsc', 'Nri', 'Remarks', 'Active'],
+    map: r => ({
+      id: r.Id, code: r.Code, name: r.Name, custType: r.CustType, panNo: r.PanNo, gstin: r.Gstin,
+      phone: r.Phone, email: r.Email, address: r.Address,
+      bankName: r.BankName, bankAcc: r.BankAcc, bankIfsc: r.BankIfsc,
+      nri: !!r.Nri, remarks: r.Remarks, active: r.Active
+    })
+  },
+  brokers: {
+    table: 'Brokers', prefix: 'BRK',
+    cols: ['Name', 'Firm', 'PanNo', 'Gstin', 'Phone', 'Email', 'ReraNo', 'Remarks', 'Active'],
+    map: r => ({
+      id: r.Id, code: r.Code, name: r.Name, firm: r.Firm, panNo: r.PanNo, gstin: r.Gstin,
+      phone: r.Phone, email: r.Email, reraNo: r.ReraNo, remarks: r.Remarks, active: r.Active
+    })
   },
   users: {
     table: 'Users', prefix: 'USR',
@@ -73,6 +91,8 @@ function bindValue(request, param, col, value) {
   } else if (DATE_COLS.has(col)) {
     const v = value === '' || value === null || value === undefined ? null : value;
     request.input(param, sql.Date, v);
+  } else if (col === 'Nri') {
+    request.input(param, sql.Bit, value === true || value === 1 || value === '1' || value === 'Yes' ? 1 : 0);
   } else {
     let v = value;
     if ((v === undefined || v === null || v === '') && col in DEFAULTS) v = DEFAULTS[col];
@@ -113,6 +133,7 @@ function router(entityKey) {
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
         PanNo: 'panNo', Gstin: 'gstin', UnitType: 'unitType', Plc: 'plc', CoveredArea: 'coveredArea', ReraNo: 'reraNo', OcStatus: 'ocStatus',
+        CustomerId: 'customerId', CustType: 'custType', Phone: 'phone', Firm: 'firm', Nri: 'nri', Remarks: 'remarks',
         LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
         BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',
@@ -156,6 +177,7 @@ function router(entityKey) {
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
         PanNo: 'panNo', Gstin: 'gstin', UnitType: 'unitType', Plc: 'plc', CoveredArea: 'coveredArea', ReraNo: 'reraNo', OcStatus: 'ocStatus',
+        CustomerId: 'customerId', CustType: 'custType', Phone: 'phone', Firm: 'firm', Nri: 'nri', Remarks: 'remarks',
         LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
         BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',

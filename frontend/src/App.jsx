@@ -5,12 +5,12 @@ import Login from './Login.jsx';
 import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
 import {
   money, money0, fmtDate, ymLabel, curYM, addMonths, nameOf, findById, toCSV, download,
-  CATEGORIES, ROLES, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES
+  CATEGORIES, ROLES, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES, LIFECYCLE_STAGES
 } from './helpers.js';
 import { canView, canEdit, canApproveRole } from './permissions.js';
 
 const EMPTY_DB = {
-  companies: [], assets: [], blocks: [], units: [], brands: [], users: [],
+  companies: [], assets: [], blocks: [], units: [], brands: [], users: [], customers: [], brokers: [],
   leases: [], sales: [], invoices: [], collections: [], investorUnits: [], disbursals: []
 };
 
@@ -36,16 +36,16 @@ export default function App() {
   }, []);
 
   const refresh = useCallback(async (keys) => {
-    const all = ['companies', 'assets', 'blocks', 'units', 'brands', 'users', 'leases', 'sales', 'invoices', 'collections', 'investorUnits', 'disbursals'];
+    const all = ['companies', 'assets', 'blocks', 'units', 'brands', 'users', 'customers', 'brokers', 'leases', 'sales', 'invoices', 'collections', 'investorUnits', 'disbursals'];
     // module key in the permissions matrix for each db key
-    const moduleOf = { investorUnits: 'investors', disbursals: 'disbursement' };
+    const moduleOf = { investorUnits: 'investors', disbursals: 'disbursement', customers: 'units', brokers: 'brands' };
     const role = roleRef.current;
     let target = keys || all;
     // Only fetch what this role may view (avoids 403s that would otherwise leave tables empty)
     if (role) target = target.filter((k) => canView(role, moduleOf[k] || k));
     const fetchers = {
       companies: api.companies.list, assets: api.assets.list, blocks: api.blocks.list, units: api.units.list,
-      brands: api.brands.list, users: api.users.list, leases: api.leases.list, sales: api.sales.list,
+      brands: api.brands.list, users: api.users.list, customers: api.customers.list, brokers: api.brokers.list, leases: api.leases.list, sales: api.sales.list,
       invoices: api.invoices.list, collections: api.collections.list, investorUnits: api.investorUnits.list,
       disbursals: api.disbursement.list
     };
@@ -212,7 +212,7 @@ export default function App() {
 function PageAction({ view, setModal, db, actingRole }) {
   // No create button unless the role can edit this module
   if (!canEdit(actingRole, view)) return null;
-  const MASTER_KEYS = ['companies', 'assets', 'blocks', 'units', 'brands', 'users'];
+  const MASTER_KEYS = ['companies', 'assets', 'blocks', 'units', 'brands', 'customers', 'brokers', 'users'];
   if (MASTER_KEYS.includes(view)) {
     return <button className="btn btn-teal" onClick={() => setModal({ type: 'master', entity: view })}><PlusIcon />New {MASTER_SCHEMA[view].sing.toLowerCase()}</button>;
   }
@@ -238,7 +238,7 @@ function SearchBox({ placeholder, value, onChange }) {
 
 function ViewRouter(props) {
   const { view } = props;
-  const MASTER_KEYS = ['companies', 'assets', 'blocks', 'units', 'brands', 'users'];
+  const MASTER_KEYS = ['companies', 'assets', 'blocks', 'units', 'brands', 'customers', 'brokers', 'users'];
   if (MASTER_KEYS.includes(view)) return <MasterListPage {...props} entity={view} />;
   if (view === 'home') return <HomePage {...props} />;
   if (view === 'dashboard') return <Dashboard {...props} />;
@@ -248,6 +248,7 @@ function ViewRouter(props) {
   if (view === 'invoices') return <InvoicesPage {...props} />;
   if (view === 'collections') return <CollectionsPage {...props} />;
   if (view === 'collectionmaster') return <CollectionMasterPage {...props} />;
+  if (view === 'ledger') return <LedgerPage {...props} />;
   if (view === 'investors') return <InvestorsPage {...props} />;
   if (view === 'investoraccounts') return <InvestorAccountsPage {...props} />;
   if (view === 'disbursement') return <DisbursementPage {...props} />;
@@ -555,6 +556,10 @@ function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin
       return <ResetPasswordModal user={modal.user} onClose={close} refresh={refresh} notify={notify} />;
     case 'lease':
       return <LeaseFormModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
+    case 'leaseStage':
+      return <LeaseStageModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
+    case 'creditNote':
+      return <CreditNoteModal invoice={modal.invoice} onClose={close} refresh={refresh} notify={notify} />;
     case 'holdLease':
       return <HoldLeaseModal id={modal.id} onClose={close} refresh={refresh} notify={notify} />;
     case 'confirmDeleteLease':
@@ -888,6 +893,31 @@ function Dashboard({ db }) {
         </div>
       )}
 
+      {(() => {
+        const in90 = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+        const exp = db.leases.filter((l) => l.status === 'Active' && (l.lifecycleStage || 'Active') === 'Active' && l.endDate <= in90)
+          .sort((a, b) => (a.endDate < b.endDate ? -1 : 1));
+        if (!exp.length) return null;
+        return (
+          <div className="panel" style={{ marginBottom: 16 }}>
+            <div className="ph"><h3>⏳ Leases expiring within 90 days — plan renewal or exit</h3></div>
+            <div className="pb">
+              <table><thead><tr><th>Lease</th><th>Brand / Unit</th><th>Expiry</th><th>Days left</th></tr></thead>
+                <tbody>{exp.slice(0, 6).map((l) => {
+                  const days = Math.ceil((new Date(l.endDate) - Date.now()) / 86400000);
+                  return (
+                    <tr key={l.id}><td><span className="code">{l.code}</span></td>
+                      <td>{nameOf(db.brands, l.brandId)}<div className="sub">{nameOf(db.units, l.unitId)}</div></td>
+                      <td className="sub">{fmtDate(l.endDate)}</td>
+                      <td>{days <= 0 ? <Pill color="red">Expired</Pill> : days <= 30 ? <Pill color="red">{days} days</Pill> : <Pill color="amber">{days} days</Pill>}</td></tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="grid2">
         <div className="panel">
           <div className="ph"><h3>Recent invoices</h3></div>
@@ -962,7 +992,7 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
       <div className="tablewrap">
         {db.leases.length === 0 ? <EmptyState thing="lease" onAdd={canEditView ? () => setModal({ type: 'lease' }) : null} /> : (
           <table>
-            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Stage</th><th>Hold</th><th>Alerts</th><th></th></tr></thead>
+            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Lifecycle</th><th>Hold</th><th>Alerts</th><th></th></tr></thead>
             <tbody>
               {rows.map((l) => (
                 <tr key={l.id}>
@@ -971,7 +1001,13 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
                   <td><RentTypePill t={l.rentalType} /></td>
                   <td className="num">{l.mg ? money0(l.mg) : '—'} {l.revSharePct ? `/ ${l.revSharePct}%` : ''}</td>
                   <td className="sub">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
-                  <td>{l.stage ? <Pill color="grey">{l.stage}</Pill> : (l.brandStatus ? <span className="sub">{l.brandStatus}</span> : '—')}</td>
+                  <td>
+                    <button className="stagepill" title="Click to move this lease to its next stage"
+                      onClick={() => setModal({ type: 'leaseStage', id: l.id })}>
+                      {l.lifecycleStage || 'Active'}
+                    </button>
+                    {l.stage && <div className="sub">{l.stage}</div>}
+                  </td>
                   <td>{l.onHold ? <Pill color="amber">On hold</Pill> : <Pill color="green">Active</Pill>}</td>
                   <td>
                     <button
@@ -1238,84 +1274,283 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
   const unit = findById(db.units, form.unitId);
   const brand = findById(db.brands, form.brandId);
 
+  const SECS = Object.fromEntries(LEASE_SECTIONS.map(([n, fs]) => [n, fs]));
+  const renderSec = (name) => (
+    <div className="form-section" key={name}>
+      <div className="sectlabel big">{name}</div>
+      <div className="lease-grid">{(SECS[name] || []).map(renderField)}</div>
+    </div>
+  );
+  const STEPS = ['Parties & Unit', 'Commercial Terms', 'Approval (NFA)', 'Agreement & Key Dates', 'Deposits, CAM & Brokerage', 'Billing & Invoice Parties', 'Remarks & Documents'];
+  const [step, setStep] = useState(0);
+  const ownerCustomer = unit ? findById(db.customers, unit.customerId) : null;
+
   return (
-    <Modal title={id ? 'Edit lease' : 'New lease'} onClose={onClose} onSave={save} wide>
+    <Modal title={(id ? 'Edit lease' : 'New lease') + ` — Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`} onClose={onClose} onSave={save} wide
+      footer={<>
+        <div className="wiz-nav">
+          <button className="btn btn-ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>← Back</button>
+          <button className="btn btn-ghost" disabled={step === STEPS.length - 1} onClick={() => setStep(step + 1)}>Next →</button>
+        </div>
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-teal" onClick={save}>{id ? 'Save changes' : 'Create lease'}</button>
+      </>}>
+      <div className="wiz-steps">
+        {STEPS.map((t, i) => (
+          <button key={t} className={'wiz-step' + (i === step ? ' on' : i < step ? ' done' : '')} onClick={() => setStep(i)}>
+            <span className="wiz-n">{i + 1}</span>{t}
+          </button>
+        ))}
+      </div>
       <div className="lease-form">
 
-        {/* ===== Rental ===== */}
-        <div className="form-section">
-          <div className="sectlabel big">Rental</div>
-          <div className="grp2">
-            <div className="field"><label>Brand <span className="req">*</span></label>
-              <select value={form.brandId} onChange={(e) => set('brandId', e.target.value)}>
-                {db.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+        {step === 0 && (
+          <div className="form-section">
+            <div className="sectlabel big">Parties & Unit</div>
+            <div className="grp2">
+              <div className="field"><label>Brand <span className="req">*</span></label>
+                <select value={form.brandId} onChange={(e) => set('brandId', e.target.value)}>
+                  {db.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div className="field"><label>Unit <span className="req">*</span></label>
+                <select value={form.unitId} disabled={!!id} onChange={(e) => set('unitId', e.target.value)}>
+                  {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}</option>)}
+                </select>
+              </div>
             </div>
-            <div className="field"><label>Unit <span className="req">*</span></label>
-              <select value={form.unitId} disabled={!!id} onChange={(e) => set('unitId', e.target.value)}>
-                {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}{u.owner ? ' · owner: ' + u.owner : ''}</option>)}
-              </select>
+            {(ownerCustomer || (unit && unit.owner)) && (
+              <Callout>Unit owner (Customer master): <b>{ownerCustomer ? `${ownerCustomer.name} · ${ownerCustomer.code}` : unit.owner}</b>
+                {ownerCustomer && ownerCustomer.panNo ? ` · PAN ${ownerCustomer.panNo}` : ''}</Callout>
+            )}
+            <div className="grp3">
+              <div className="field"><label>Start date <span className="req">*</span></label><input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
+              <div className="field"><label>Term (months)</label><input type="number" value={form.months} disabled={!!id} onChange={(e) => set('months', +e.target.value)} /></div>
+              <div className="field"><label>Broker / channel partner</label>
+                <select value={form.brokerId || ''} onChange={(e) => set('brokerId', e.target.value)}>
+                  <option value="">— direct (no broker) —</option>
+                  {(db.brokers || []).map((b) => <option key={b.id} value={b.id}>{b.name}{b.firm ? ' · ' + b.firm : ''}</option>)}
+                </select>
+              </div>
             </div>
           </div>
-          {unit && unit.owner ? <Callout>Unit owner (customer): <b>{unit.owner}</b></Callout> : null}
-          <div className="grp3">
-            <div className="field"><label>Start date <span className="req">*</span></label><input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
-            <div className="field"><label>Term (months)</label><input type="number" value={form.months} disabled={!!id} onChange={(e) => set('months', +e.target.value)} /></div>
-            <div className="field"><label>GST %</label><input type="number" value={form.gst} onChange={(e) => set('gst', +e.target.value)} /></div>
-          </div>
-          <div className="field"><label>Type</label>
-            <select value={form.rentalType} onChange={(e) => set('rentalType', e.target.value)}>
-              {RENTAL_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <div className="grp2">
-            <div className="field"><label>MG basis</label>
-              <select value={form.mgBasis} onChange={(e) => set('mgBasis', e.target.value)}>
-                {['Lumpsum', 'PerSqFt'].map((o) => <option key={o}>{o}</option>)}
-              </select>
-            </div>
-            <div className="field"><label>MG amount (₹ lumpsum or ₹/sq ft)</label><input type="number" value={form.mg} onChange={(e) => set('mg', +e.target.value)} /></div>
-          </div>
-          <div className="grp2">
-            <div className="field"><label>Revenue share %</label><input type="number" step="0.5" value={form.revSharePct} onChange={(e) => set('revSharePct', +e.target.value)} /></div>
-            <div className="field"><label>Annual escalation %</label><input type="number" step="0.5" value={form.esc} onChange={(e) => set('esc', +e.target.value)} /></div>
-          </div>
-          <div className="grp3">
-            <div className="field"><label>CAM (₹/sq ft b-up)</label><input type="number" value={form.cam} onChange={(e) => set('cam', +e.target.value)} /></div>
-            <div className="field"><label>Utility (₹/sq ft b-up)</label><input type="number" value={form.utility} onChange={(e) => set('utility', +e.target.value)} /></div>
-            <div className="field"><label>Security deposit (₹)</label><input type="number" value={form.deposit} onChange={(e) => set('deposit', +e.target.value)} /></div>
-          </div>
-          <Callout>{RENTAL_HINT[form.rentalType]}</Callout>
-        </div>
+        )}
 
-        {/* ===== Note for Approval ===== */}
-        <div className="form-section">
-          <div className="sectlabel big">Note for Approval</div>
-          <div className="nfa-auto">
-            <div><span>Project</span><b>{nameOf(db.assets, unit?.assetId) || 'Orchard Street'}</b></div>
-            <div><span>Brand</span><b>{brand?.name || '—'}</b></div>
-            <div><span>CP name</span><b>{form.channelPartner || '—'}</b></div>
-            <div><span>Unit no</span><b>{unit?.name || '—'}</b></div>
-            <div><span>Super area (sq ft)</span><b>{unit?.builtupArea != null ? (+unit.builtupArea).toLocaleString('en-IN') : '—'}</b></div>
-            <div><span>Owner / customer</span><b>{unit?.owner || form.nfaClientName || '—'}</b></div>
+        {step === 1 && (
+          <div className="form-section">
+            <div className="sectlabel big">Commercial Terms</div>
+            <div className="grp2">
+              <div className="field"><label>Type</label>
+                <select value={form.rentalType} onChange={(e) => set('rentalType', e.target.value)}>
+                  {RENTAL_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <div className="field"><label>GST %</label><input type="number" value={form.gst} onChange={(e) => set('gst', +e.target.value)} /></div>
+            </div>
+            <div className="grp2">
+              <div className="field"><label>MG basis</label>
+                <select value={form.mgBasis} onChange={(e) => set('mgBasis', e.target.value)}>
+                  {['Lumpsum', 'PerSqFt'].map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+              <div className="field"><label>MG amount (₹ lumpsum or ₹/sq ft)</label><input type="number" step="0.01" value={form.mg} onChange={(e) => set('mg', +e.target.value)} /></div>
+            </div>
+            <div className="grp2">
+              <div className="field"><label>Revenue share %</label><input type="number" step="0.5" value={form.revSharePct} onChange={(e) => set('revSharePct', +e.target.value)} /></div>
+              <div className="field"><label>Annual escalation % (auto-applied each lease anniversary)</label><input type="number" step="0.5" value={form.esc} onChange={(e) => set('esc', +e.target.value)} /></div>
+            </div>
+            <div className="grp3">
+              <div className="field"><label>CAM (₹/sq ft b-up)</label><input type="number" value={form.cam} onChange={(e) => set('cam', +e.target.value)} /></div>
+              <div className="field"><label>Utility (₹/sq ft b-up)</label><input type="number" value={form.utility} onChange={(e) => set('utility', +e.target.value)} /></div>
+              <div className="field"><label>Security deposit (₹)</label><input type="number" value={form.deposit} onChange={(e) => set('deposit', +e.target.value)} /></div>
+            </div>
+            <Callout>{RENTAL_HINT[form.rentalType]}</Callout>
           </div>
-          <div className="lease-grid">
-            {NFA_ROWS.map((row, idx) => {
-              if (row[0] === 'section') return <div className="sectlabel sub-sect" key={'sec' + idx}>{row[1]}</div>;
-              return renderField(row);
-            })}
-          </div>
-        </div>
+        )}
 
-        {/* ===== All remaining detail sections ===== */}
-        {LEASE_SECTIONS.map((sec, i) => (
-          <div className="form-section" key={i}>
-            <div className="sectlabel big">{sec[0]}</div>
-            <div className="lease-grid">{sec[1].map(renderField)}</div>
+        {step === 2 && (
+          <div className="form-section">
+            <div className="sectlabel big">Note for Approval</div>
+            <div className="nfa-auto">
+              <div><span>Project</span><b>{nameOf(db.assets, unit?.assetId) || '—'}</b></div>
+              <div><span>Brand</span><b>{brand?.name || '—'}</b></div>
+              <div><span>CP name</span><b>{form.channelPartner || nameOf(db.brokers, form.brokerId) || '—'}</b></div>
+              <div><span>Unit no</span><b>{unit?.name || '—'}</b></div>
+              <div><span>Super area (sq ft)</span><b>{unit?.builtupArea != null ? (+unit.builtupArea).toLocaleString('en-IN') : '—'}</b></div>
+              <div><span>Owner / customer</span><b>{ownerCustomer?.name || unit?.owner || form.nfaClientName || '—'}</b></div>
+            </div>
+            <div className="lease-grid">
+              {NFA_ROWS.map((row, idx) => {
+                if (row[0] === 'section') return <div className="sectlabel sub-sect" key={'sec' + idx}>{row[1]}</div>;
+                return renderField(row);
+              })}
+            </div>
           </div>
-        ))}
+        )}
+
+        {step === 3 && ['Booking & Brand', 'Consent, Possession & TCV', 'Agreement & Registration', 'Key Dates'].map(renderSec)}
+        {step === 4 && ['Fitout & Capex', 'Tenure & Security Deposit', 'CAM', 'Brokerage'].map(renderSec)}
+        {step === 5 && ['Billing Config', 'Invoice Party Details'].map(renderSec)}
+        {step === 6 && (
+          <>
+            {renderSec('Remarks')}
+            <div className="form-section">
+              <div className="sectlabel big">Documents (deed, LOI, NFA, registration…)</div>
+              {id ? <LeaseDocsPanel leaseId={id} notify={notify} />
+                : <Callout>Save the lease first — then reopen it to upload its documents here.</Callout>}
+            </div>
+          </>
+        )}
 
       </div>
+    </Modal>
+  );
+}
+
+/* Per-lease document vault panel */
+function LeaseDocsPanel({ leaseId, notify }) {
+  const [docs, setDocs] = React.useState(null);
+  const [docType, setDocType] = React.useState('Lease Deed');
+  const [busy, setBusy] = React.useState(false);
+  const fileRef = React.useRef(null);
+  const load = async () => { try { setDocs(await api.leaseDocs.list(leaseId)); } catch (e) { notify(e.message, true); } };
+  useEffect(() => { load(); }, [leaseId]); // eslint-disable-line
+
+  const onUpload = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setBusy(true);
+    try { await api.leaseDocs.upload(leaseId, f, docType); notify('Uploaded ' + f.name); await load(); }
+    catch (err) { notify(err.message, true); }
+    finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+  const del = async (d) => {
+    try { await api.leaseDocs.remove(leaseId, d.id); notify('Deleted ' + d.fileName); await load(); }
+    catch (err) { notify(err.message, true); }
+  };
+  const fmtSize = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+
+  return (
+    <div className="docs-panel">
+      <div className="grp2" style={{ alignItems: 'end' }}>
+        <div className="field"><label>Document type</label>
+          <select value={docType} onChange={(e) => setDocType(e.target.value)}>
+            {['Lease Deed', 'LOI', 'NFA', 'Registration', 'KYC', 'Possession Letter', 'Other'].map((o) => <option key={o}>{o}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>Upload (PDF / image / Word / Excel, ≤25 MB)</label>
+          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" disabled={busy} onChange={onUpload} />
+        </div>
+      </div>
+      {docs === null ? <div className="sub">Loading documents…</div> : docs.length === 0 ? (
+        <div className="sub" style={{ padding: '8px 2px' }}>No documents yet — upload the scanned lease deed to keep it with this lease.</div>
+      ) : (
+        <table>
+          <thead><tr><th>Type</th><th>File</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+          <tbody>
+            {docs.map((d) => (
+              <tr key={d.id}>
+                <td><Pill color="grey">{d.docType || 'Other'}</Pill></td>
+                <td><a href={api.leaseDocs.downloadUrl(leaseId, d.id) + '?t=' + encodeURIComponent(getToken() || '')}
+                       onClick={(e) => { e.preventDefault(); downloadDoc(leaseId, d, notify); }}>{d.fileName}</a></td>
+                <td className="sub">{fmtSize(d.sizeBytes)}</td>
+                <td className="sub">{d.uploadedAt ? new Date(d.uploadedAt).toLocaleString('en-GB') : '—'}</td>
+                <td className="rowact"><button className="iconbtn danger" title="Delete" onClick={() => del(d)}><DelIcon /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+async function downloadDoc(leaseId, d, notify) {
+  try {
+    const res = await fetch(api.leaseDocs.downloadUrl(leaseId, d.id), { headers: { Authorization: 'Bearer ' + getToken() } });
+    if (!res.ok) throw new Error('Download failed (' + res.status + ')');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = d.fileName; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  } catch (e) { notify(e.message, true); }
+}
+
+/* Lifecycle stage modal with audit log */
+function LeaseStageModal({ id, db, onClose, refresh, notify }) {
+  const lease = findById(db.leases, id);
+  const [stage, setStage] = React.useState(lease?.lifecycleStage || 'Active');
+  const [remarks, setRemarks] = React.useState('');
+  const [log, setLog] = React.useState(null);
+  useEffect(() => { (async () => { try { setLog(await api.leases.stageLog(id)); } catch (_) { setLog([]); } })(); }, [id]); // eslint-disable-line
+  if (!lease) return null;
+  const save = async () => {
+    try {
+      await api.leases.setStage(id, stage, remarks);
+      await refresh(['leases']);
+      notify(`${lease.code} moved to '${stage}'.`);
+      onClose();
+    } catch (e) { notify(e.message, true); }
+  };
+  return (
+    <Modal title={`Lifecycle stage — ${lease.code} (${nameOf(db.brands, lease.brandId)})`} onClose={onClose} onSave={save} saveLabel="Update stage">
+      <div className="stage-rail">
+        {LIFECYCLE_STAGES.map((st) => (
+          <button key={st} className={'stage-chip' + (st === stage ? ' on' : '') + (st === (lease.lifecycleStage || 'Active') ? ' cur' : '')}
+            onClick={() => setStage(st)}>{st}</button>
+        ))}
+      </div>
+      <Callout>Invoices generate only for leases in the <b>Active</b> stage. Current stage: <b>{lease.lifecycleStage || 'Active'}</b>.</Callout>
+      <div className="field"><label>Remarks (goes to the stage audit log)</label>
+        <input value={remarks} placeholder="e.g. Registered deed received, rent commencement confirmed" onChange={(e) => setRemarks(e.target.value)} /></div>
+      <div className="sectlabel">Stage history</div>
+      {log === null ? <div className="sub">Loading…</div> : log.length === 0 ? <div className="sub">No stage changes recorded yet.</div> : (
+        <table><tbody>
+          {log.slice(0, 8).map((x, i) => (
+            <tr key={i}><td className="sub">{new Date(x.at).toLocaleString('en-GB')}</td>
+              <td>{x.from || '—'} → <b>{x.to}</b></td>
+              <td className="sub">{x.by}</td><td className="sub">{x.remarks || ''}</td></tr>
+          ))}
+        </tbody></table>
+      )}
+    </Modal>
+  );
+}
+
+/* Credit / Debit note modal */
+function CreditNoteModal({ invoice, onClose, refresh, notify }) {
+  const [noteType, setNoteType] = React.useState('Credit');
+  const [amount, setAmount] = React.useState('');
+  const [reason, setReason] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const balance = invoice.balance ?? (invoice.total - (invoice.paid || 0) - (invoice.credited || 0));
+  const save = async () => {
+    if (!amount || Number(amount) <= 0) return notify('Enter a positive taxable amount.', true);
+    if (!reason.trim()) return notify('A reason is mandatory for a credit/debit note.', true);
+    setBusy(true);
+    try {
+      const r = await api.creditNotes.create({ invoiceId: invoice.id, amount: Number(amount), reason, noteType });
+      await refresh(['invoices']);
+      notify(`${noteType} note ${r.no} issued for ₹${r.total.toLocaleString('en-IN')} (incl. GST).`);
+      onClose();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`${noteType} note — against ${invoice.no}`} onClose={onClose} onSave={save} saveLabel={busy ? 'Saving…' : 'Issue note'}>
+      <Callout>The correct way to reduce or add to a billed invoice — never delete a posted invoice.
+        GST ({invoice.gstPct}%) is applied on the amount automatically. Open balance: <b>₹{Number(balance).toLocaleString('en-IN')}</b>.</Callout>
+      <div className="grp2">
+        <div className="field"><label>Note type</label>
+          <select value={noteType} onChange={(e) => setNoteType(e.target.value)}>
+            <option>Credit</option><option>Debit</option>
+          </select>
+        </div>
+        <div className="field"><label>Taxable amount (₹) <span className="req">*</span></label>
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+      </div>
+      <div className="field"><label>Reason <span className="req">*</span></label>
+        <input value={reason} placeholder="e.g. Rate correction per deed — rent billed at wrong rate" onChange={(e) => setReason(e.target.value)} /></div>
     </Modal>
   );
 }
@@ -1447,6 +1682,7 @@ function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal
                     {pendingIds.has(i.id) ? <Pill color="amber">Deletion pending</Pill> : (
                       <>
                         {canEditView && i.status !== 'Paid' && <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'collection', invoiceId: i.id })}>Collect</button>}
+                        {canEditView && <button className="btn btn-ghost btn-sm" title="Issue credit / debit note" onClick={() => setModal({ type: 'creditNote', invoice: i })}>CN</button>}
                         {canEditView && <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteInvoice', id: i.id })}><DelIcon /></button>}
                       </>
                     )}
@@ -2540,6 +2776,83 @@ function DeletionsPage({ refresh, notify }) {
           onClose={() => setConfirm(null)}
           onConfirm={runDecision}
         />
+      )}
+    </>
+  );
+}
+
+/* ===================== TENANT LEDGER (SOA) ===================== */
+function LedgerPage({ db, notify }) {
+  const [brandId, setBrandId] = React.useState('');
+  const [data, setData] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = async (bid) => {
+    setBrandId(bid);
+    if (!bid) { setData(null); return; }
+    setBusy(true);
+    try { setData(await api.ledger(bid)); } catch (e) { notify(e.message, true); setData(null); }
+    finally { setBusy(false); }
+  };
+
+  const exportXlsx = () => {
+    if (!data) return;
+    const header = ['Date', 'Document', 'Type', 'Detail', 'Debit (Rs)', 'Credit (Rs)', 'Balance (Rs)'];
+    const rows = data.rows.map((r) => [r.date, r.doc, r.kind, r.detail, r.debit || '', r.credit || '', r.balance]);
+    const ws = XLSX.utils.aoa_to_sheet([[`Statement of Account — ${nameOf(db.brands, brandId)}`], [], header, ...rows,
+      [], ['', '', '', 'TOTALS', data.totals.debit, data.totals.credit, data.totals.balance]]);
+    ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 50 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'SOA');
+    XLSX.writeFile(wb, `SOA_${nameOf(db.brands, brandId).replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
+    notify('Statement downloaded.');
+  };
+
+  const kindPill = (k) => k === 'Invoice' ? <Pill color="teal">Invoice</Pill>
+    : k === 'Receipt' ? <Pill color="green">Receipt</Pill>
+    : k === 'Credit Note' ? <Pill color="violet">Credit Note</Pill>
+    : k === 'Debit Note' ? <Pill color="red">Debit Note</Pill>
+    : <Pill color="amber">{k}</Pill>;
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="field" style={{ maxWidth: 360, margin: 0 }}>
+          <select value={brandId} onChange={(e) => load(e.target.value)}>
+            <option value="">— select a tenant (brand) —</option>
+            {db.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        {data && <button className="btn btn-ghost btn-sm" onClick={exportXlsx}>⬇ Excel (.xlsx)</button>}
+      </div>
+      {!brandId ? <div className="tablewrap"><EmptyMini text="Pick a tenant to see its full statement — invoices, credit notes, receipts and running balance." /></div>
+        : busy ? <div className="empty"><p>Building statement…</p></div>
+        : !data || data.rows.length === 0 ? <div className="tablewrap"><EmptyMini text="No transactions for this tenant yet." /></div> : (
+        <>
+          <div className="kpirow" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(3,1fr)' }}>
+            <div className="kpi"><div className="kpi-l">Total debited (invoices + DN)</div><div className="kpi-v">{money0(data.totals.debit)}</div></div>
+            <div className="kpi"><div className="kpi-l">Total credited (receipts + CN)</div><div className="kpi-v" style={{ color: 'var(--green)' }}>{money0(data.totals.credit)}</div></div>
+            <div className="kpi"><div className="kpi-l">Closing balance (receivable)</div><div className="kpi-v" style={{ color: data.totals.balance > 0 ? 'var(--amber)' : 'var(--green)' }}>{money0(data.totals.balance)}</div></div>
+          </div>
+          <div className="tablewrap">
+            <table>
+              <thead><tr><th>Date</th><th>Document</th><th>Type</th><th>Detail</th><th className="num">Debit</th><th className="num">Credit</th><th className="num">Balance</th></tr></thead>
+              <tbody>
+                {data.rows.map((r, i) => (
+                  <tr key={i}>
+                    <td className="sub">{fmtDate(r.date)}</td>
+                    <td><span className="code">{r.doc}</span></td>
+                    <td>{kindPill(r.kind)}</td>
+                    <td className="sub">{r.detail}</td>
+                    <td className="num">{r.debit ? money0(r.debit) : ''}</td>
+                    <td className="num" style={{ color: 'var(--green)' }}>{r.credit ? money0(r.credit) : ''}</td>
+                    <td className="num strong">{money0(r.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </>
   );
