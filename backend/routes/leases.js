@@ -2,6 +2,7 @@ const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, addM, iso } = require('../lib/helpers');
 const { LEASE_FIELDS, sqlType, coerce, mapExtra } = require('../lib/leaseFields');
+const { logAudit, diffRows, userName } = require('../lib/audit');
 const router = express.Router();
 
 function mgAmount(l, unit) {
@@ -25,6 +26,11 @@ function mapLease(r) {
     gst: Number(r.Gst), onHold: !!r.OnHold, holdRemarks: r.HoldRemarks, status: r.Status,
     alertsEnabled: r.AlertsEnabled == null ? true : !!r.AlertsEnabled,
     lifecycleStage: r.LifecycleStage || 'Active',
+    docStatus: r.DocStatus || 'Approved', submittedBy: r.SubmittedBy || null,
+    approvedBy: r.ApprovedBy || null,
+    approvedAt: r.ApprovedAt ? new Date(r.ApprovedAt).toISOString() : null,
+    rejectReason: r.RejectReason || null, createdBy: r.CreatedBy || null,
+    createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null,
     ...mapExtra(r)
   };
 }
@@ -71,11 +77,13 @@ router.post('/', async (req, res) => {
       extraCols.push(col);
       extraVals.push('@' + pname);
     }
-    const colList = 'Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,OnHold,Status' + (extraCols.length ? ',' + extraCols.join(',') : '');
-    const valList = "@id,@code,@brandId,@unitId,@assetId,@start,@end,@rentalType,@mgBasis,@mg,@revSharePct,@cam,@utility,@esc,@deposit,@gst,0,'Active'" + (extraVals.length ? ',' + extraVals.join(',') : '');
+    request.input('wfBy', sql.NVarChar(150), userName(req));
+    const colList = 'Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,OnHold,Status,DocStatus,SubmittedBy,SubmittedAt,CreatedBy,CreatedAt' + (extraCols.length ? ',' + extraCols.join(',') : '');
+    const valList = "@id,@code,@brandId,@unitId,@assetId,@start,@end,@rentalType,@mgBasis,@mg,@revSharePct,@cam,@utility,@esc,@deposit,@gst,0,'Active','Pending',@wfBy,SYSDATETIME(),@wfBy,SYSDATETIME()" + (extraVals.length ? ',' + extraVals.join(',') : '');
     await request.query(`INSERT INTO ${SCHEMA}.Leases (${colList}) VALUES (${valList})`);
 
     await pool.request().input('id', sql.VarChar(40), b.unitId).query(`UPDATE ${SCHEMA}.Units SET Status='Leased' WHERE Id=@id`);
+    await logAudit(pool, 'leases', id, 'created', `Lease ${code} created — pending approval`, userName(req));
 
     const row = await pool.request().input('id', sql.VarChar(40), id).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
     res.json(mapLease(row.recordset[0]));
@@ -87,6 +95,8 @@ router.put('/:id', async (req, res) => {
     const pool = await getPool();
     const b = req.body;
     if (typeof b.igstApplicable === 'string') b.igstApplicable = b.igstApplicable === 'Yes' ? 1 : 0;
+    const oldRow = (await pool.request().input('id', sql.VarChar(40), req.params.id)
+      .query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`)).recordset[0];
     const request = pool.request();
     request.input('id', sql.VarChar(40), req.params.id);
     request.input('brandId', sql.VarChar(40), b.brandId);
@@ -116,6 +126,11 @@ router.put('/:id', async (req, res) => {
     const setClause = baseSets + (extraSets.length ? ', ' + extraSets.join(', ') : '');
     await request.query(`UPDATE ${SCHEMA}.Leases SET ${setClause} WHERE Id=@id`);
     const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
+    // Field-level change log for the record's activity timeline
+    const watchCols = ['BrandId', 'StartDate', 'RentalType', 'MgBasis', 'Mg', 'RevSharePct', 'Cam', 'Utility', 'Esc', 'Deposit', 'Gst',
+      ...LEASE_FIELDS.filter(f => Object.prototype.hasOwnProperty.call(b, f[0])).map(f => f[1])];
+    const diff = diffRows(oldRow, row.recordset[0], watchCols);
+    if (diff) await logAudit(pool, 'leases', req.params.id, 'edited', diff, userName(req));
     res.json(mapLease(row.recordset[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -169,9 +184,12 @@ router.post('/:id/stage', async (req, res) => {
     const { stage, remarks } = req.body;
     if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Invalid stage. Allowed: ' + STAGES.join(', ') });
     const cur = await pool.request().input('id', sql.VarChar(40), req.params.id)
-      .query(`SELECT LifecycleStage FROM ${SCHEMA}.Leases WHERE Id=@id`);
+      .query(`SELECT LifecycleStage, DocStatus FROM ${SCHEMA}.Leases WHERE Id=@id`);
     if (!cur.recordset.length) return res.status(404).json({ error: 'Lease not found' });
     const from = cur.recordset[0].LifecycleStage || 'Active';
+    if (stage === 'Active' && (cur.recordset[0].DocStatus || 'Approved') !== 'Approved') {
+      return res.status(400).json({ error: 'This lease is still pending approval — an approver must approve it before it can go Active.' });
+    }
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('st', sql.VarChar(30), stage)
       .query(`UPDATE ${SCHEMA}.Leases SET LifecycleStage=@st WHERE Id=@id`);
     await pool.request()
@@ -180,6 +198,7 @@ router.post('/:id/stage', async (req, res) => {
       .input('by', sql.NVarChar(150), req.user ? (req.user.email || req.user.username || 'system') : 'system')
       .input('rm', sql.NVarChar(400), (remarks || '').slice(0, 400))
       .query(`INSERT INTO ${SCHEMA}.LeaseStageLog (Id,LeaseId,FromStage,ToStage,ChangedBy,Remarks) VALUES (@lid,@l,@f,@t,@by,@rm)`);
+    await logAudit(pool, 'leases', req.params.id, 'stage', `Stage moved ${from} → ${stage}${remarks ? ' — ' + String(remarks).slice(0, 200) : ''}`, userName(req));
     res.json({ id: req.params.id, lifecycleStage: stage });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -241,6 +260,7 @@ router.post('/:id/exit', async (req, res) => {
       .input('f', sql.VarChar(30), lease.LifecycleStage || 'Active').input('t', sql.VarChar(30), 'Exited')
       .input('by', sql.NVarChar(150), by).input('rm', sql.NVarChar(400), `Exit settlement: SD ${sdHeld} − dues ${outstanding} − deductions ${totalDed} = refund ${netRefund}`)
       .query(`INSERT INTO ${SCHEMA}.LeaseStageLog (Id,LeaseId,FromStage,ToStage,ChangedBy,Remarks) VALUES (@lid,@l,@f,@t,@by,@rm)`);
+    await logAudit(pool, 'leases', req.params.id, 'exited', `Exit settlement: SD ${sdHeld} − dues ${outstanding} − deductions ${totalDed} = refund ${netRefund}`, by);
     res.json({ settlementId: sid, sdHeld, outstanding, totalDeductions: totalDed, netRefund });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -284,7 +304,8 @@ router.post('/:id/renew', async (req, res) => {
       JOIN sys.tables t ON t.object_id=c.object_id
       JOIN sys.schemas sc ON sc.schema_id=t.schema_id
       WHERE sc.name='${SCHEMA}' AND t.name='Leases'`);
-    const skip = new Set(['Id', 'Code', 'StartDate', 'EndDate', 'Mg', 'LifecycleStage', 'RenewedToId', 'ExitDate', 'OnHold', 'HoldRemarks', 'Status']);
+    const skip = new Set(['Id', 'Code', 'StartDate', 'EndDate', 'Mg', 'LifecycleStage', 'RenewedToId', 'ExitDate', 'OnHold', 'HoldRemarks', 'Status',
+      'DocStatus', 'SubmittedBy', 'SubmittedAt', 'ApprovedBy', 'ApprovedAt', 'RejectReason', 'CreatedBy', 'CreatedAt']);
     const copyCols = colsR.recordset.map(c => c.name).filter(n => !skip.has(n));
     const colList = copyCols.map(c => `[${c}]`).join(',');
 
@@ -292,8 +313,9 @@ router.post('/:id/renew', async (req, res) => {
       .input('nid', sql.VarChar(40), newId).input('nc', sql.VarChar(20), newCode)
       .input('s', sql.Date, startDate).input('e', sql.Date, endDate)
       .input('mg', sql.Decimal(18, 2), newMg).input('oid', sql.VarChar(40), req.params.id)
-      .query(`INSERT INTO ${SCHEMA}.Leases (Id,Code,StartDate,EndDate,Mg,LifecycleStage,RenewedToId,ExitDate,OnHold,HoldRemarks,Status,${colList})
-              SELECT @nid,@nc,@s,@e,@mg,'Active',NULL,NULL,0,NULL,'Active',${colList}
+      .input('wfBy', sql.NVarChar(150), req.user ? (req.user.email || req.user.username || 'system') : 'system')
+      .query(`INSERT INTO ${SCHEMA}.Leases (Id,Code,StartDate,EndDate,Mg,LifecycleStage,RenewedToId,ExitDate,OnHold,HoldRemarks,Status,DocStatus,SubmittedBy,SubmittedAt,CreatedBy,CreatedAt,${colList})
+              SELECT @nid,@nc,@s,@e,@mg,'Active',NULL,NULL,0,NULL,'Active','Pending',@wfBy,SYSDATETIME(),@wfBy,SYSDATETIME(),${colList}
               FROM ${SCHEMA}.Leases WHERE Id=@oid`);
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('nid', sql.VarChar(40), newId)
       .query(`UPDATE ${SCHEMA}.Leases SET LifecycleStage='Renewed', Status='Closed', RenewedToId=@nid WHERE Id=@id`);
@@ -303,6 +325,8 @@ router.post('/:id/renew', async (req, res) => {
       .input('f', sql.VarChar(30), old.LifecycleStage || 'Active').input('t', sql.VarChar(30), 'Renewed')
       .input('by', sql.NVarChar(150), by).input('rm', sql.NVarChar(400), `Renewed as ${newCode} from ${startDate} at MG ${newMg}`)
       .query(`INSERT INTO ${SCHEMA}.LeaseStageLog (Id,LeaseId,FromStage,ToStage,ChangedBy,Remarks) VALUES (@lid,@l,@f,@t,@by,@rm)`);
+    await logAudit(pool, 'leases', req.params.id, 'renewed', `Renewed as ${newCode} from ${startDate} at MG ${newMg}`, by);
+    await logAudit(pool, 'leases', newId, 'created', `Created by renewal of ${old.Code} — new term ${startDate} to ${endDate}, MG ${newMg}`, by);
     res.json({ id: newId, code: newCode, startDate, endDate, mg: newMg });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -53,7 +53,18 @@ const BASE_COLUMNS = [
   ['Leases', 'ExitDate', 'DATE NULL'],
   ['Leases', 'BrokerId', 'VARCHAR(40) NULL'],
   ['Leases', 'LifecycleStage', "VARCHAR(30) NOT NULL DEFAULT 'Active'"],
-  ['Brands', 'LesseeCompanyNote', 'NVARCHAR(300) NULL']
+  ['Brands', 'LesseeCompanyNote', 'NVARCHAR(300) NULL'],
+  // ── v4: maker–checker workflow on documents ──
+  ...['Invoices', 'Leases', 'Collections', 'CreditNotes'].flatMap(t => [
+    [t, 'DocStatus', 'VARCHAR(20) NULL'],
+    [t, 'SubmittedBy', 'NVARCHAR(150) NULL'],
+    [t, 'SubmittedAt', 'DATETIME2 NULL'],
+    [t, 'ApprovedBy', 'NVARCHAR(150) NULL'],
+    [t, 'ApprovedAt', 'DATETIME2 NULL'],
+    [t, 'RejectReason', 'NVARCHAR(400) NULL'],
+    [t, 'CreatedBy', 'NVARCHAR(150) NULL'],
+    [t, 'CreatedAt', 'DATETIME2 NULL']
+  ])
 ];
 
 // v3 tables — created when missing (idempotent)
@@ -115,6 +126,22 @@ const TABLES = [
       Remarks NVARCHAR(500) NULL,
       CreatedBy NVARCHAR(150) NULL,
       CreatedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
+  ['Comments', `CREATE TABLE {S}.Comments(
+      Id VARCHAR(40) PRIMARY KEY,
+      EntityType VARCHAR(30) NOT NULL,
+      EntityId VARCHAR(40) NOT NULL,
+      Author NVARCHAR(150) NULL,
+      Body NVARCHAR(2000) NOT NULL,
+      CreatedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
+  ['AuditLog', `CREATE TABLE {S}.AuditLog(
+      Id VARCHAR(40) PRIMARY KEY,
+      EntityType VARCHAR(30) NOT NULL,
+      EntityId VARCHAR(40) NOT NULL,
+      Action VARCHAR(30) NOT NULL,
+      Detail NVARCHAR(MAX) NULL,
+      ByUser NVARCHAR(150) NULL,
+      At DATETIME2 NOT NULL DEFAULT SYSDATETIME());
+      CREATE INDEX IX_AuditLog_Entity ON {S}.AuditLog(EntityType, EntityId)`],
   ['LeaseStageLog', `CREATE TABLE {S}.LeaseStageLog(
       Id VARCHAR(40) PRIMARY KEY,
       LeaseId VARCHAR(40) NOT NULL,
@@ -224,6 +251,13 @@ async function autoMigrate(pool, sql, SCHEMA) {
     await pool.request().query(`UPDATE ${SCHEMA}.Leases SET HsnCode='997212' WHERE HsnCode IS NULL;
       UPDATE ${SCHEMA}.Leases SET PaymentTermsDays=7 WHERE PaymentTermsDays IS NULL;
       UPDATE ${SCHEMA}.Invoices SET PlaceOfSupply='HARYANA' WHERE PlaceOfSupply IS NULL;`);
+  } catch (e) { /* non-fatal */ }
+  // Workflow backfill: anything created before the maker–checker workflow
+  // (or inserted without a DocStatus) is treated as already approved.
+  try {
+    for (const t of ['Invoices', 'Leases', 'Collections', 'CreditNotes']) {
+      await pool.request().query(`UPDATE ${SCHEMA}.${t} SET DocStatus='Approved' WHERE DocStatus IS NULL`);
+    }
   } catch (e) { /* non-fatal */ }
   console.log(`[autoMigrate] schema check complete — ${added} column(s) added${failed ? `, ${failed} failed` : ''}.`);
 }

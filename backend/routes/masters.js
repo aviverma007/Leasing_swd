@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo } = require('../lib/helpers');
 const { BRAND_FIELDS } = require('../lib/brandFields');
+const { logAudit, diffRows, userName } = require('../lib/audit');
 
 // Table/field maps for each master entity
 const ENTITIES = {
@@ -151,6 +152,7 @@ function router(entityKey) {
         await pool.request().input('id', sql.VarChar(40), id).query(`UPDATE ${SCHEMA}.Users SET PwdChangedAt=SYSDATETIME() WHERE Id=@id`);
       }
       const row = await pool.request().input('id', sql.VarChar(40), id).query(`SELECT * FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
+      await logAudit(pool, entityKey, id, 'created', `${ent.table.replace(/s$/, '')} ${code} — ${row.recordset[0].Name || row.recordset[0].Email || ''} created`, userName(req));
       res.json(ent.map(row.recordset[0]));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -190,8 +192,16 @@ function router(entityKey) {
         return `${col}=@${param}`;
       });
       const setClause = sets.join(',') + (pwdChanged ? ', PwdChangedAt=SYSDATETIME()' : '');
+      const oldRow = (await pool.request().input('id', sql.VarChar(40), req.params.id)
+        .query(`SELECT * FROM ${SCHEMA}.${ent.table} WHERE Id=@id`)).recordset[0];
       await request.query(`UPDATE ${SCHEMA}.${ent.table} SET ${setClause} WHERE Id=@id`);
       const row = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`SELECT * FROM ${SCHEMA}.${ent.table} WHERE Id=@id`);
+      const diffCols = cols.filter(c => c !== 'Password');
+      const diff = diffRows(oldRow, row.recordset[0], diffCols);
+      if (diff || pwdChanged) {
+        await logAudit(pool, entityKey, req.params.id, 'edited',
+          [diff, pwdChanged ? 'Password: changed' : null].filter(Boolean).join('; '), userName(req));
+      }
       res.json(ent.map(row.recordset[0]));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

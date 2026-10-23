@@ -59,7 +59,7 @@ router.get('/gst-recon', async (req, res) => {
         ISNULL(SUM(c.collected),0)   AS TotalCollected,
         COUNT(DISTINCT i.Id)         AS InvoiceCount
       FROM ${SCHEMA}.Invoices i
-      OUTER APPLY (SELECT SUM(Amount) collected FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
+      OUTER APPLY (SELECT SUM(Amount) collected FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') c
       GROUP BY i.Ym
       ORDER BY i.Ym DESC`);
     res.json(rows.recordset.map(r => ({
@@ -222,7 +222,7 @@ router.get('/alerts', async (req, res) => {
         ISNULL(c.paid,0) AS Paid
       FROM ${SCHEMA}.Invoices i
       JOIN ${SCHEMA}.Brands b ON b.Id=i.BrandId
-      OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
+      OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') c
       WHERE i.DueDate < @today AND ISNULL(c.paid,0) + 0.5 < i.Total
       ORDER BY i.DueDate ASC`);
 
@@ -233,7 +233,7 @@ router.get('/alerts', async (req, res) => {
         ISNULL(c.paid,0) AS Paid
       FROM ${SCHEMA}.Invoices i
       JOIN ${SCHEMA}.Brands b ON b.Id=i.BrandId
-      OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
+      OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') c
       WHERE i.DueDate >= @today AND i.DueDate <= @soon AND ISNULL(c.paid,0) + 0.5 < i.Total
       ORDER BY i.DueDate ASC`);
 

@@ -20,17 +20,26 @@ function mapInvoice(r, paid, credited) {
     hsnCode: r.HsnCode || '997212', paymentTermsDays: r.PaymentTermsDays || 7,
     ackNo: r.AckNo || null, ackDate: r.AckDate ? new Date(r.AckDate).toISOString() : null, placeOfSupply: r.PlaceOfSupply || 'HARYANA',
     total, dueDate: r.DueDate.toISOString().slice(0, 10), irn: r.Irn, paid: p, credited: cr,
-    balance: round2(total - p - cr), status, poolGroupId: r.PoolGroupId || null
+    balance: round2(total - p - cr), status, poolGroupId: r.PoolGroupId || null,
+    docStatus: r.DocStatus || 'Approved', submittedBy: r.SubmittedBy || null,
+    approvedBy: r.ApprovedBy || null,
+    approvedAt: r.ApprovedAt ? new Date(r.ApprovedAt).toISOString() : null,
+    rejectReason: r.RejectReason || null, createdBy: r.CreatedBy || null,
+    createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null
   };
 }
+
+/* Only approved receipts and credit/debit notes count in balances (maker–checker) */
+const PAID_APPLY = (S) => `OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${S}.Collections WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') c`;
+const CRED_APPLY = (S) => `OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) AS credited FROM ${S}.CreditNotes WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') cn`;
 
 router.get('/', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
       SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i
-      OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
-      OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) AS credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn
+      ${PAID_APPLY(SCHEMA)}
+      ${CRED_APPLY(SCHEMA)}
       ORDER BY i.DueDate DESC`);
     res.json(result.recordset.map(r => mapInvoice(r, r.Paid, r.Credited)));
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -42,11 +51,14 @@ router.get('/:id/print', async (req, res) => {
     const pool = await getPool();
     const invRow = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`
       SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i
-      OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
-      OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) AS credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn
+      ${PAID_APPLY(SCHEMA)}
+      ${CRED_APPLY(SCHEMA)}
       WHERE i.Id=@id`);
     if (!invRow.recordset.length) return res.status(404).json({ error: 'Invoice not found' });
     const inv = invRow.recordset[0];
+    if ((inv.DocStatus || 'Approved') !== 'Approved') {
+      return res.status(403).json({ error: `Invoice ${inv.No} is ${inv.DocStatus === 'Rejected' ? 'rejected' : 'pending approval'} — an approver must approve it before it can be printed.` });
+    }
 
     const leaseRow = await pool.request().input('id', sql.VarChar(40), inv.LeaseId).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
     const lease = leaseRow.recordset[0];
@@ -89,7 +101,7 @@ router.post('/:id/sd-adjust', async (req, res) => {
     const { sdAdjAmt, note } = req.body;
     if (!sdAdjAmt || Number(sdAdjAmt) <= 0) return res.status(400).json({ error: 'Enter a valid SD adjustment amount.' });
     const invRow = await pool.request().input('id', sql.VarChar(40), req.params.id)
-      .query(`SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i OUTER APPLY (SELECT SUM(Amount) AS paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) AS credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn WHERE i.Id=@id`);
+      .query(`SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i ${PAID_APPLY(SCHEMA)} ${CRED_APPLY(SCHEMA)} WHERE i.Id=@id`);
     const inv = invRow.recordset[0];
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
     const balance = round2(Number(inv.Total) - Number(inv.Paid) - Number(inv.Credited));
@@ -105,8 +117,12 @@ router.post('/:id/sd-adjust', async (req, res) => {
       .input('sdAdjAmt', sql.Decimal(18, 2), adjAmt)
       .input('sdNote', sql.NVarChar(300), note || 'Security deposit adjustment')
       .input('instrument', sql.VarChar(20), 'SD-Adjust')
-      .query(`INSERT INTO ${SCHEMA}.Collections (Id,No,InvoiceId,CollDate,Amount,SdAdjAmt,SdNote,Instrument,TdsPct,Tds)
-        VALUES (@id,@no,@invoiceId,@collDate,@amount,@sdAdjAmt,@sdNote,@instrument,0,0)`);
+      .input('by', sql.NVarChar(150), (req.user && (req.user.email || req.user.username)) || 'system')
+      .query(`INSERT INTO ${SCHEMA}.Collections (Id,No,InvoiceId,CollDate,Amount,SdAdjAmt,SdNote,Instrument,TdsPct,Tds,DocStatus,CreatedBy,CreatedAt)
+        VALUES (@id,@no,@invoiceId,@collDate,@amount,@sdAdjAmt,@sdNote,@instrument,0,0,'Pending',@by,SYSDATETIME())`);
+    const { logAudit, userName } = require('../lib/audit');
+    await logAudit(pool, 'collections', id, 'created', `SD adjustment ${no} of ₹${adjAmt} against invoice ${inv.No}`, userName(req));
+    await logAudit(pool, 'invoices', req.params.id, 'sd-adjusted', `SD adjustment ${no} of ₹${adjAmt} recorded (pending approval)`, userName(req));
     res.json({ id, no, adjAmt });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -126,9 +142,10 @@ router.post('/generate', async (req, res) => {
     }
     let count = 0;
     const debug = { scanned: leases.length, ym, results: [] };
+    const genBy = (req.user && (req.user.email || req.user.username)) || 'system';
     for (const leaseId of leases) {
       try {
-        const n = await genLeaseInvoices(pool, leaseId, ym);
+        const n = await genLeaseInvoices(pool, leaseId, ym, genBy);
         count += n;
         debug.results.push({ leaseId, generated: n });
       } catch (le) {
@@ -167,8 +184,9 @@ router.post('/generate-pool', async (req, res) => {
     if (!leaseIds || !leaseIds.length) return res.status(400).json({ error: 'Provide at least one lease ID.' });
     const poolGroupId = uid();
     let count = 0;
+    const poolBy = (req.user && (req.user.email || req.user.username)) || 'system';
     for (const leaseId of leaseIds) {
-      const n = await genLeaseInvoices(pool, leaseId, ym);
+      const n = await genLeaseInvoices(pool, leaseId, ym, poolBy);
       if (n > 0) {
         await pool.request().input('grp', sql.VarChar(40), poolGroupId).input('lid', sql.VarChar(40), leaseId).input('ym', sql.Char(7), ym)
           .query(`UPDATE ${SCHEMA}.Invoices SET PoolGroupId=@grp WHERE LeaseId=@lid AND Ym=@ym`);
@@ -205,8 +223,11 @@ router.post('/adhoc', async (req, res) => {
       .input('ackNo', sql.VarChar(20), String(Math.floor(1e11 + Math.random() * 9e11)))
       .input('ackDate', sql.DateTime2, new Date())
       .input('pos', sql.NVarChar(60), 'HARYANA')
-      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays,AckNo,AckDate,PlaceOfSupply)
-        VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays,@ackNo,@ackDate,@pos)`);
+      .input('by', sql.NVarChar(150), (req.user && (req.user.email || req.user.username)) || 'system')
+      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays,AckNo,AckDate,PlaceOfSupply,DocStatus,CreatedBy,CreatedAt)
+        VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays,@ackNo,@ackDate,@pos,'Pending',@by,SYSDATETIME())`);
+    const { logAudit, userName } = require('../lib/audit');
+    await logAudit(pool, 'invoices', id, 'created', `Ad-hoc invoice ${no} — ${desc || 'Ad-hoc charge'} ₹${total}`, userName(req));
     res.json({ id, no });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

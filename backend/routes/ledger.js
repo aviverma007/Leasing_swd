@@ -17,11 +17,11 @@ router.get('/:brandId', async (req, res) => {
     const rec = await pool.request().input('b', sql.VarChar(40), brandId).query(`
       SELECT c.Id, c.No, c.CollDate AS D, c.Amount, c.Tds, c.Instrument, c.SdAdjAmt, i.No AS InvNo
       FROM ${SCHEMA}.Collections c JOIN ${SCHEMA}.Invoices i ON i.Id=c.InvoiceId
-      WHERE i.BrandId=@b`);
+      WHERE i.BrandId=@b AND ISNULL(c.DocStatus,'Approved')='Approved'`);
     const cns = await pool.request().input('b', sql.VarChar(40), brandId).query(`
       SELECT cn.Id, cn.No, cn.NoteType, cn.NoteDate AS D, cn.Total, cn.Reason, i.No AS InvNo
       FROM ${SCHEMA}.CreditNotes cn JOIN ${SCHEMA}.Invoices i ON i.Id=cn.InvoiceId
-      WHERE i.BrandId=@b`);
+      WHERE i.BrandId=@b AND ISNULL(cn.DocStatus,'Approved')='Approved'`);
 
     const rows = [];
     inv.recordset.forEach(r => rows.push({

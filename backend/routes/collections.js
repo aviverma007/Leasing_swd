@@ -9,7 +9,11 @@ router.get('/', async (req, res) => {
     const result = await pool.request().query(`SELECT * FROM ${SCHEMA}.Collections ORDER BY CollDate DESC`);
     res.json(result.recordset.map(r => ({
       id: r.Id, no: r.No, invoiceId: r.InvoiceId, date: r.CollDate.toISOString().slice(0, 10),
-      amount: Number(r.Amount), tdsPct: Number(r.TdsPct), tds: Number(r.Tds), instrument: r.Instrument, ref: r.Ref
+      amount: Number(r.Amount), tdsPct: Number(r.TdsPct), tds: Number(r.Tds), instrument: r.Instrument, ref: r.Ref,
+      sdAdjAmt: Number(r.SdAdjAmt || 0), sdNote: r.SdNote || null,
+      docStatus: r.DocStatus || 'Approved', approvedBy: r.ApprovedBy || null,
+      rejectReason: r.RejectReason || null, createdBy: r.CreatedBy || null,
+      createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null
     })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -26,9 +30,12 @@ router.post('/', async (req, res) => {
       .input('id', sql.VarChar(40), id).input('no', sql.VarChar(20), no).input('invoiceId', sql.VarChar(40), invoiceId)
       .input('date', sql.Date, date).input('amount', sql.Decimal(18, 2), amount).input('tdsPct', sql.Decimal(9, 3), tdsPct || 0)
       .input('tds', sql.Decimal(18, 2), tds).input('instrument', sql.VarChar(20), instrument).input('ref', sql.NVarChar(100), ref || '')
-      .query(`INSERT INTO ${SCHEMA}.Collections (Id,No,InvoiceId,CollDate,Amount,TdsPct,Tds,Instrument,Ref)
-        VALUES (@id,@no,@invoiceId,@date,@amount,@tdsPct,@tds,@instrument,@ref)`);
-    res.json({ id, no });
+      .input('by', sql.NVarChar(150), (req.user && (req.user.email || req.user.username)) || 'system')
+      .query(`INSERT INTO ${SCHEMA}.Collections (Id,No,InvoiceId,CollDate,Amount,TdsPct,Tds,Instrument,Ref,DocStatus,CreatedBy,CreatedAt)
+        VALUES (@id,@no,@invoiceId,@date,@amount,@tdsPct,@tds,@instrument,@ref,'Pending',@by,SYSDATETIME())`);
+    const { logAudit, userName } = require('../lib/audit');
+    await logAudit(pool, 'collections', id, 'created', `Receipt ${no} of ₹${amount} (${instrument || 'receipt'}) — pending approval`, userName(req));
+    res.json({ id, no, docStatus: 'Pending' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

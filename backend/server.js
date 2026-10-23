@@ -54,6 +54,12 @@ app.use('/api/credit-notes', requireModule('invoices'), require('./routes/credit
 app.use('/api/ledger', requireModule('invoices'), require('./routes/ledger'));
 app.use('/api/lease-docs', requireModule('leases'), require('./routes/documents'));
 
+// v4: maker–checker workflow, activity timeline & comments, global search, workspace stats
+app.use('/api/wf', require('./routes/workflow'));
+app.use('/api', require('./routes/activity')); // /api/activity/:type/:id + /api/comments/:type/:id
+app.use('/api/search', require('./routes/search'));
+app.use('/api/stats', require('./routes/stats'));
+
 // deletion approval queue (route enforces admin-only for approve/reject internally)
 app.use('/api/deletion-requests', require('./routes/deletionRequests'));
 

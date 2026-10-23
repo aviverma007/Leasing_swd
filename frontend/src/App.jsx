@@ -9,18 +9,52 @@ import {
 } from './helpers.js';
 import { canView, canEdit, canApproveRole, setAccessMatrix } from './permissions.js';
 import { onNextStep, suggestNextStep } from './nextSteps.js';
+import { RecordPage, ApprovalsPage, CommandPalette, WorkspaceCards, DocStatusPill, ListMeta } from './records.jsx';
 
 const EMPTY_DB = {
   companies: [], assets: [], blocks: [], units: [], brands: [], users: [], customers: [], brokers: [],
   leases: [], sales: [], invoices: [], collections: [], investorUnits: [], disbursals: []
 };
 
+/* Hash routing — every list and record has its own URL:
+   #/leases          → leases list
+   #/leases/<id>     → that lease's full record page */
+function parseHash() {
+  const h = window.location.hash.replace(/^#\/?/, '');
+  if (!h) return { view: 'home', recordId: null };
+  const [v, id] = h.split('/');
+  return { view: v || 'home', recordId: id ? decodeURIComponent(id) : null };
+}
+
 export default function App() {
   const [authUser, setAuthUser] = useState(null); // null = not logged in
   const [db, setDb] = useState(EMPTY_DB);
   const [pendingDel, setPendingDel] = useState({}); // entity -> [recordIds] with pending deletion
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('home');
+  const [route, setRoute] = useState(parseHash);
+  const view = route.view;
+  const recordId = route.recordId;
+  const setView = useCallback((v, id) => {
+    const h = '#/' + v + (id ? '/' + encodeURIComponent(id) : '');
+    if (window.location.hash === h) return;
+    window.location.hash = h;
+  }, []);
+  useEffect(() => {
+    const f = () => setRoute(parseHash());
+    window.addEventListener('hashchange', f);
+    return () => window.removeEventListener('hashchange', f);
+  }, []);
+  const [palOpen, setPalOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G' || e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPalOpen((s) => !s);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [currentProject, setCurrentProject] = useState('all'); // asset id or 'all'
   const [search, setSearch] = useState('');
   const [filterVal, setFilterVal] = useState('');
@@ -144,8 +178,11 @@ export default function App() {
   if (restoring) return <div className="login-wrap"><div style={{ color: '#fff' }}>Loading…</div></div>;
   if (!authUser) return <Login onLogin={onLogin} />;
 
-  const page = PAGES[view];
+  const page = PAGES[view] || { t: 'Smart Leasing', s: '' };
   const pendingDelCount = Object.values(pendingDel || {}).reduce((s, arr) => s + (arr ? arr.length : 0), 0);
+  const pendingApprCount = (db.invoices || []).filter((x) => x.docStatus === 'Pending').length
+    + (db.leases || []).filter((x) => x.docStatus === 'Pending').length
+    + (db.collections || []).filter((x) => x.docStatus === 'Pending').length;
 
   // Scope data to the selected project (asset). Brands can span projects, so keep all.
   const scopedDb = (() => {
@@ -176,6 +213,7 @@ export default function App() {
             <a key={n.v} className={n.v === view ? 'active' : ''} onClick={() => setView(n.v)}>
               {n.label}
               {n.v === 'deletions' && pendingDelCount > 0 && <span className="cnt alert">!</span>}
+              {n.v === 'approvals' && pendingApprCount > 0 && <span className="cnt alert">{pendingApprCount}</span>}
             </a>
           ))}
         </nav>
@@ -201,6 +239,11 @@ export default function App() {
             <svg viewBox="0 0 24 24" width="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h18M3 6h18M3 18h18" /></svg>
           </div>
           <div className="tt"><h2>{page.t}</h2><p>{page.s}</p></div>
+          <button className="globalsearch" onClick={() => setPalOpen(true)} title="Search anything (Ctrl+G)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+            <span>Search or type a command</span>
+            <kbd>Ctrl+G</kbd>
+          </button>
           {db.assets && db.assets.length > 1 && (
             <div className="proj-switch">
               <label>Project</label>
@@ -217,7 +260,12 @@ export default function App() {
           </div>
         </div>
         <div className="wrap">
-          {loading ? <div className="empty"><p>Loading…</p></div> : (
+          {loading ? <div className="empty"><p>Loading…</p></div> : recordId ? (
+            <div className="view-anim" key={view + '/' + recordId}>
+              <RecordPage view={view} id={recordId} db={db} go={setView} setModal={setModal}
+                refresh={refresh} notify={notify} actingRole={actingRole} />
+            </div>
+          ) : (
             <div className="view-anim" key={view}>
             <ViewRouter view={view} setView={setView} db={scopedDb} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
               actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} pendingDel={pendingDel}
@@ -229,6 +277,7 @@ export default function App() {
       {modal && (
         <ModalRouter modal={modal} db={db} setModal={setModal} refresh={refresh} notify={notify} actingRole={actingRole} isAdmin={authUser.isAdmin} />
       )}
+      <CommandPalette open={palOpen} onClose={() => setPalOpen(false)} go={setView} actingRole={actingRole} />
       {nextStep && (
         <div className="nextstep" role="status">
           <div className="nextstep-rail" />
@@ -289,6 +338,7 @@ function ViewRouter(props) {
   if (view === 'sales') return <SalesPage {...props} />;
   if (view === 'invoices') return <InvoicesPage {...props} />;
   if (view === 'collections') return <CollectionsPage {...props} />;
+  if (view === 'approvals') return <ApprovalsPage {...props} go={props.setView} />;
   if (view === 'collectionmaster') return <CollectionMasterPage {...props} />;
   if (view === 'ledger') return <LedgerPage {...props} />;
   if (view === 'roleprofiles') return <RoleProfilesPage {...props} />;
@@ -306,10 +356,22 @@ function ViewRouter(props) {
 }
 
 /* ===================== MASTERS (generic CRUD) ===================== */
-function MasterListPage({ entity, db, search, setSearch, setModal, refresh, notify, canEditView, pendingDel, openInventoryUnit }) {
+function MasterListPage({ entity, db, search, setSearch, setView, setModal, refresh, notify, canEditView, pendingDel, openInventoryUnit }) {
   const sc = MASTER_SCHEMA[entity];
   const pendingIds = new Set((pendingDel && pendingDel[entity]) || []);
-  const rows = (db[entity] || []).filter((r) => !search || JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
+  const [pageSize, setPageSize] = useState(20);
+  const [colF, setColF] = useState({});
+  useEffect(() => { setColF({}); setPageSize(20); }, [entity]);
+  const cellsOf = (r) => sc.cols(r, db).map((c) => (typeof c === 'string' || typeof c === 'number') ? String(c) : '');
+  let rows = (db[entity] || []).filter((r) => !search || JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
+  const fEntries = Object.entries(colF).filter(([, v]) => v && v.trim());
+  if (fEntries.length) {
+    rows = rows.filter((r) => {
+      const cs = cellsOf(r);
+      return fEntries.every(([i, v]) => (cs[+i] || '').toLowerCase().includes(v.trim().toLowerCase()));
+    });
+  }
+  const totalRows = rows.length;
 
   const del = async (id) => {
     try { await api[entity].remove(id); await refresh([entity]); notify('Deleted.'); }
@@ -317,9 +379,9 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
   };
 
   const renderRow = (r) => (
-    <tr key={r.id}>
+    <tr key={r.id} className="rowlink" onClick={() => setView(entity, r.id)} title="Open record — full details, activity log & comments">
       {sc.cols(r, db).map((c, i) => <td key={i}>{i === 0 ? <span className="code">{c}</span> : c}</td>)}
-      <td className="rowact">
+      <td className="rowact" onClick={(e) => e.stopPropagation()}>
         {pendingIds.has(r.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
           <>
             {entity === 'users' && <button className="iconbtn" title="Reset password" onClick={() => setModal({ type: 'resetPassword', user: r })}>
@@ -335,10 +397,18 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
 
   const renderTable = (rowSet) => (
     <table>
-      <thead><tr>{sc.head.map((h) => <th key={h}>{h}</th>)}<th></th></tr></thead>
+      <thead>
+        <tr>{sc.head.map((h) => <th key={h}>{h}</th>)}<th></th></tr>
+        <tr className="filt-row">
+          {sc.head.map((h, i) => (
+            <th key={i}><input value={colF[i] || ''} placeholder={h} onChange={(e) => setColF((s) => ({ ...s, [i]: e.target.value }))} /></th>
+          ))}
+          <th></th>
+        </tr>
+      </thead>
       <tbody>
         {rowSet.length === 0 ? <tr><td colSpan={sc.head.length + 1} style={{ textAlign: 'center', color: 'var(--muted)', padding: 28 }}>No records match your search.</td></tr> :
-          rowSet.map(renderRow)}
+          rowSet.slice(0, pageSize).map(renderRow)}
       </tbody>
     </table>
   );
@@ -379,6 +449,7 @@ function MasterListPage({ entity, db, search, setSearch, setModal, refresh, noti
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
       <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
         <SearchBox placeholder={`Search ${sc.sing.toLowerCase()}…`} value={search} onChange={setSearch} />
+        <ListMeta shown={totalRows} total={(db[entity] || []).length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       {db[entity].length === 0 ? (
         <div className="tablewrap"><EmptyState thing={sc.sing} onAdd={canEditView ? () => setModal({ type: 'master', entity }) : null} /></div>
@@ -857,7 +928,7 @@ function UnitDetailSlide({ unit, db, onClose }) {
 }
 function CloseIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>; }
 
-function Dashboard({ db }) {
+function Dashboard({ db, setView, actingRole }) {
   const [showAllDue, setShowAllDue] = React.useState(false);
   const totalUnits = db.units.length;
   const leasedUnits = db.units.filter((u) => u.status === 'Leased').length;
@@ -883,6 +954,7 @@ function Dashboard({ db }) {
 
   return (
     <>
+      <WorkspaceCards go={setView} actingRole={actingRole} />
       <div className="kpis">
         <div className="kpi on"><div className="lab">Units leased</div><div className="val">{leasedUnits} / {totalUnits}</div><div className="sub">{vacantUnits} vacant</div></div>
         <div className="kpi"><div className="lab">Outstanding receivables</div><div className="val m">{money0(unpaidTotal)}</div><div className="sub">across unpaid/partial invoices</div></div>
@@ -998,6 +1070,27 @@ function Dashboard({ db }) {
           </div>
         </div>
       </div>
+
+      <div className="grid2" style={{ marginTop: 16 }}>
+        <div className="panel">
+          <div className="ph"><h3>Billing Reports</h3></div>
+          <div className="pb rpt-links">
+            {[['reportcenter', '📊 Report Center — all 12 Excel reports'], ['ledger', '📒 Tenant Ledger (Statement of Account)'],
+              ['collectionmaster', '📥 Collection Master — invoiced vs collected'], ['reports', '🧾 Reports & SAP Entry Book']]
+              .filter(([v]) => canView(actingRole, v))
+              .map(([v, l]) => <a key={v} onClick={() => setView(v)}>{l}</a>)}
+          </div>
+        </div>
+        <div className="panel">
+          <div className="ph"><h3>Reconciliation Reports</h3></div>
+          <div className="pb rpt-links">
+            {[['gstrecon', '🧮 GST Reconciliation (CGST/SGST/IGST)'], ['tdsrecon', '🧮 TDS Reconciliation (26Q/27Q)'],
+              ['agreementrecon', '🧮 Agreement Reconciliation'], ['sdrecon', '🧮 Security Deposit Reconciliation']]
+              .filter(([v]) => canView(actingRole, v))
+              .map(([v, l]) => <a key={v} onClick={() => setView(v)}>{l}</a>)}
+          </div>
+        </div>
+      </div>
     </>
   );
 }
@@ -1029,9 +1122,18 @@ function UnitStatusPill({ s }) {
 }
 
 /* ===================== LEASES ===================== */
-function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditView, pendingDel }) {
+function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.leases) || []);
-  const rows = db.leases.filter((l) => !search || [nameOf(db.brands, l.brandId), nameOf(db.units, l.unitId), l.code].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const [pageSize, setPageSize] = useState(20);
+  const [fStage, setFStage] = useState('');
+  const [fType, setFType] = useState('');
+  const [fAppr, setFAppr] = useState('');
+  let rows = db.leases.filter((l) => !search || [nameOf(db.brands, l.brandId), nameOf(db.units, l.unitId), l.code].join(' ').toLowerCase().includes(search.toLowerCase()));
+  if (fStage) rows = rows.filter((l) => (l.lifecycleStage || 'Active') === fStage);
+  if (fType) rows = rows.filter((l) => l.rentalType === fType);
+  if (fAppr) rows = rows.filter((l) => (l.docStatus || 'Approved') === fAppr);
+  const totalRows = rows.length;
+  rows = rows.slice(0, pageSize);
   const release = async (id) => {
     try { await api.leases.release(id); await refresh(['leases']); notify('Lease released from hold.'); }
     catch (e) { notify(e.message, true); }
@@ -1039,28 +1141,43 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
   return (
     <>
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
-      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}><SearchBox placeholder="Search leases, brands, units…" value={search} onChange={setSearch} /></div>
+      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
+        <SearchBox placeholder="Search leases, brands, units…" value={search} onChange={setSearch} />
+        <select className="filt" value={fType} onChange={(e) => setFType(e.target.value)}>
+          <option value="">All types</option>
+          {RENTAL_TYPES.map(([v]) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <select className="filt" value={fStage} onChange={(e) => setFStage(e.target.value)}>
+          <option value="">All stages</option>
+          {LIFECYCLE_STAGES.map((s) => <option key={s}>{s}</option>)}
+        </select>
+        <select className="filt" value={fAppr} onChange={(e) => setFAppr(e.target.value)}>
+          <option value="">Any approval</option>
+          {['Pending', 'Approved', 'Rejected'].map((s) => <option key={s}>{s}</option>)}
+        </select>
+        <ListMeta shown={totalRows} total={db.leases.length} pageSize={pageSize} setPageSize={setPageSize} />
+      </div>
       <div className="tablewrap">
         {db.leases.length === 0 ? <EmptyState thing="lease" onAdd={canEditView ? () => setModal({ type: 'lease' }) : null} /> : (
           <table>
-            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Lifecycle</th><th>Hold</th><th>Alerts</th><th></th></tr></thead>
+            <thead><tr><th>Lease</th><th>Brand / Unit</th><th>Type</th><th className="num">MG / RS%</th><th>Term</th><th>Lifecycle</th><th>Approval</th><th>Alerts</th><th></th></tr></thead>
             <tbody>
               {rows.map((l) => (
-                <tr key={l.id}>
-                  <td><span className="code">{l.code}</span></td>
+                <tr key={l.id} className="rowlink" onClick={() => setView('leases', l.id)} title="Open lease record — full details, documents, activity log">
+                  <td><span className="code">{l.code}</span>{l.onHold && <div><Pill color="amber">On hold</Pill></div>}</td>
                   <td>{nameOf(db.brands, l.brandId)}<div className="sub">{nameOf(db.units, l.unitId)}</div></td>
                   <td><RentTypePill t={l.rentalType} /></td>
                   <td className="num">{l.mg ? money0(l.mg) : '—'} {l.revSharePct ? `/ ${l.revSharePct}%` : ''}</td>
                   <td className="sub">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <button className="stagepill" title="Click to move this lease to its next stage"
                       onClick={() => setModal({ type: 'leaseStage', id: l.id })}>
                       {l.lifecycleStage || 'Active'}
                     </button>
                     {l.stage && <div className="sub">{l.stage}</div>}
                   </td>
-                  <td>{l.onHold ? <Pill color="amber">On hold</Pill> : <Pill color="green">Active</Pill>}</td>
-                  <td>
+                  <td><DocStatusPill st={l.docStatus} /></td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <button
                       className={'bell-toggle' + (l.alertsEnabled !== false ? ' on' : '')}
                       title={l.alertsEnabled !== false ? 'Alerts ON — click to mute this lease' : 'Alerts OFF — click to enable'}
@@ -1071,7 +1188,7 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
                       {l.alertsEnabled !== false ? '🔔' : '🔕'}
                     </button>
                   </td>
-                  <td className="rowact">
+                  <td className="rowact" onClick={(e) => e.stopPropagation()}>
                     {pendingIds.has(l.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
                       <>
                         {!['Exited', 'Renewed'].includes(l.lifecycleStage) && (
@@ -1708,11 +1825,16 @@ function SalesFormModal({ db, onClose, refresh, notify }) {
 }
 
 /* ===================== INVOICES ===================== */
-function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal, notify, canEditView, pendingDel }) {
+function InvoicesPage({ db, search, setSearch, setView, filterVal, setFilterVal, setModal, notify, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.invoices) || []);
+  const [pageSize, setPageSize] = useState(20);
+  const [fAppr, setFAppr] = useState('');
   let rows = db.invoices.filter((i) => !search || [i.no, i.type, nameOf(db.brands, i.brandId), nameOf(db.units, i.unitId)].join(' ').toLowerCase().includes(search.toLowerCase()));
   if (filterVal) rows = rows.filter((i) => i.type === filterVal);
+  if (fAppr) rows = rows.filter((i) => (i.docStatus || 'Approved') === fAppr);
   rows = [...rows].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
+  const totalRows = rows.length;
+  rows = rows.slice(0, pageSize);
 
   return (
     <>
@@ -1721,14 +1843,19 @@ function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal
         <select className="filt" value={filterVal} onChange={(e) => setFilterVal(e.target.value)}>
           {['', 'MG', 'RevShare', 'CAM', 'Utility', 'Adhoc'].map((t) => <option key={t} value={t}>{t || 'All types'}</option>)}
         </select>
+        <select className="filt" value={fAppr} onChange={(e) => setFAppr(e.target.value)}>
+          <option value="">Any approval</option>
+          {['Pending', 'Approved', 'Rejected'].map((s) => <option key={s}>{s}</option>)}
+        </select>
+        <ListMeta shown={totalRows} total={db.invoices.length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       <div className="tablewrap">
         {db.invoices.length === 0 ? <EmptyState thing="invoice" onAdd={canEditView ? () => setModal({ type: 'generate' }) : null} /> : (
           <table>
-            <thead><tr><th>Invoice</th><th>Type</th><th>Brand / Unit</th><th>Period</th><th className="num">Amount</th><th className="num">GST</th><th className="num">Total</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Invoice</th><th>Type</th><th>Brand / Unit</th><th>Period</th><th className="num">Amount</th><th className="num">GST</th><th className="num">Total</th><th>Approval</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {rows.map((i) => (
-                <tr key={i.id}>
+                <tr key={i.id} className="rowlink" onClick={() => setView('invoices', i.id)} title="Open invoice record — amounts, receipts, activity log">
                   <td><span className="code">{i.no}</span><div className="sub">IRN {i.irn?.slice(0, 8)}…</div></td>
                   <td><TypePill t={i.type} /></td>
                   <td>{nameOf(db.brands, i.brandId)}<div className="sub">{nameOf(db.units, i.unitId)}</div></td>
@@ -1736,8 +1863,9 @@ function InvoicesPage({ db, search, setSearch, filterVal, setFilterVal, setModal
                   <td className="num">{money(i.amount)}</td>
                   <td className="num sub">{money(i.gstAmt)}</td>
                   <td className="num strong">{money(i.total)}</td>
+                  <td><DocStatusPill st={i.docStatus} /></td>
                   <td><StatusPill st={i.status} overdue={i.dueDate < curYM() + '-01'} /></td>
-                  <td className="rowact">
+                  <td className="rowact" onClick={(e) => e.stopPropagation()}>
                     <button className="iconbtn" title="View e-invoice" onClick={() => setModal({ type: 'viewInvoice', id: i.id })}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>
                     </button>
@@ -2424,34 +2552,46 @@ function CollectionMasterPage({ db, search, setSearch }) {
   );
 }
 
-function CollectionsPage({ db, search, setSearch, setModal, canEditView, pendingDel }) {
+function CollectionsPage({ db, search, setSearch, setView, setModal, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.collections) || []);
-  const rows = db.collections.filter((c) => {
+  const [pageSize, setPageSize] = useState(20);
+  const [fAppr, setFAppr] = useState('');
+  let rows = db.collections.filter((c) => {
     const inv = findById(db.invoices, c.invoiceId);
     return !search || [c.no, inv?.no, c.ref].join(' ').toLowerCase().includes(search.toLowerCase());
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
+  if (fAppr) rows = rows.filter((c) => (c.docStatus || 'Approved') === fAppr);
+  const totalRows = rows.length;
+  rows = rows.slice(0, pageSize);
 
   return (
     <>
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
-      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}><SearchBox placeholder="Search collections…" value={search} onChange={setSearch} /></div>
+      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
+        <SearchBox placeholder="Search collections…" value={search} onChange={setSearch} />
+        <select className="filt" value={fAppr} onChange={(e) => setFAppr(e.target.value)}>
+          <option value="">Any approval</option>
+          {['Pending', 'Approved', 'Rejected'].map((s) => <option key={s}>{s}</option>)}
+        </select>
+        <ListMeta shown={totalRows} total={db.collections.length} pageSize={pageSize} setPageSize={setPageSize} />
+      </div>
       <div className="tablewrap">
         {db.collections.length === 0 ? <EmptyState thing="collection" onAdd={canEditView ? () => setModal({ type: 'collection' }) : null} /> : (
           <table>
-            <thead><tr><th>Receipt</th><th>Invoice</th><th>Date</th><th className="num">Amount</th><th className="num">TDS</th><th>Instrument</th><th>Ref</th><th></th></tr></thead>
+            <thead><tr><th>Receipt</th><th>Invoice</th><th>Date</th><th className="num">Amount</th><th className="num">TDS</th><th>Instrument</th><th>Approval</th><th></th></tr></thead>
             <tbody>
               {rows.map((c) => {
                 const inv = findById(db.invoices, c.invoiceId);
                 return (
-                  <tr key={c.id}>
+                  <tr key={c.id} className="rowlink" onClick={() => setView('collections', c.id)} title="Open receipt record — details, approval, activity log">
                     <td><span className="code">{c.no}</span></td>
                     <td><span className="code">{inv?.no}</span><div className="sub">{nameOf(db.brands, inv?.brandId)}</div></td>
                     <td className="sub">{fmtDate(c.date)}</td>
                     <td className="num strong">{money0(c.amount)}</td>
                     <td className="num sub">{money0(c.tds)}</td>
-                    <td><Pill color="grey">{c.instrument}</Pill></td>
-                    <td className="sub">{c.ref || '—'}</td>
-                    <td className="rowact">{pendingIds.has(c.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteCollection', id: c.id })}><DelIcon /></button> : <span className="sub">—</span>}</td>
+                    <td><Pill color="grey">{c.instrument}</Pill>{c.ref ? <div className="sub">{c.ref}</div> : null}</td>
+                    <td><DocStatusPill st={c.docStatus} /></td>
+                    <td className="rowact" onClick={(e) => e.stopPropagation()}>{pendingIds.has(c.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? <button className="iconbtn danger" title="Delete" onClick={() => setModal({ type: 'confirmDeleteCollection', id: c.id })}><DelIcon /></button> : <span className="sub">—</span>}</td>
                   </tr>
                 );
               })}

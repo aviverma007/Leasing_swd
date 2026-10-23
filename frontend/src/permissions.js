@@ -41,7 +41,7 @@ export const ACCESS = {
 
 export const APPROVER_ROLES = ['Admin', 'Finance Head', 'Center/Portfolio Head'];
 
-const MODULE_ALIAS = { home: 'dashboard', customers: 'units', brokers: 'brands', ledger: 'collectionmaster', roleprofiles: 'users', gstrecon: 'reports', tdsrecon: 'reports', agreementrecon: 'reports', sdrecon: 'reports', reportcenter: 'reports' };
+const MODULE_ALIAS = { home: 'dashboard', customers: 'units', brokers: 'brands', ledger: 'collectionmaster', roleprofiles: 'users', gstrecon: 'reports', tdsrecon: 'reports', agreementrecon: 'reports', sdrecon: 'reports', reportcenter: 'reports', approvals: 'dashboard', creditnotes: 'invoices' };
 
 /* Runtime (DB-driven) role matrix — loaded after login from /api/roles.
    The static ACCESS above stays as the fallback; Admin is always full access. */

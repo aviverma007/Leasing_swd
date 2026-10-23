@@ -8,7 +8,10 @@ function mapCN(r) {
     id: r.Id, no: r.No, invoiceId: r.InvoiceId, noteType: r.NoteType,
     date: r.NoteDate ? r.NoteDate.toISOString().slice(0, 10) : null,
     amount: Number(r.Amount), gstAmt: Number(r.GstAmt), total: Number(r.Total),
-    reason: r.Reason, createdBy: r.CreatedBy
+    reason: r.Reason, createdBy: r.CreatedBy,
+    docStatus: r.DocStatus || 'Approved', approvedBy: r.ApprovedBy || null,
+    rejectReason: r.RejectReason || null,
+    createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null
   };
 }
 
@@ -34,9 +37,9 @@ router.post('/', async (req, res) => {
     const invRow = await pool.request().input('id', sql.VarChar(40), invoiceId).query(`
       SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited
       FROM ${SCHEMA}.Invoices i
-      OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) c
+      OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') c
       OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) credited
-                   FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn
+                   FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') cn
       WHERE i.Id=@id`);
     const inv = invRow.recordset[0];
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
@@ -62,9 +65,12 @@ router.post('/', async (req, res) => {
       .input('amount', sql.Decimal(18, 2), amt).input('gstAmt', sql.Decimal(18, 2), gstAmt)
       .input('total', sql.Decimal(18, 2), total).input('reason', sql.NVarChar(400), String(reason).slice(0, 400))
       .input('by', sql.NVarChar(150), req.user ? (req.user.email || req.user.username || 'system') : 'system')
-      .query(`INSERT INTO ${SCHEMA}.CreditNotes (Id,No,InvoiceId,NoteType,NoteDate,Amount,GstAmt,Total,Reason,CreatedBy)
-              VALUES (@id,@no,@invoiceId,@type,@date,@amount,@gstAmt,@total,@reason,@by)`);
-    res.json({ id, no, total });
+      .query(`INSERT INTO ${SCHEMA}.CreditNotes (Id,No,InvoiceId,NoteType,NoteDate,Amount,GstAmt,Total,Reason,CreatedBy,DocStatus,CreatedAt)
+              VALUES (@id,@no,@invoiceId,@type,@date,@amount,@gstAmt,@total,@reason,@by,'Pending',SYSDATETIME())`);
+    const { logAudit, userName } = require('../lib/audit');
+    await logAudit(pool, 'creditnotes', id, 'created', `${type} note ${no} of ₹${total} against invoice ${inv.No}: ${String(reason).slice(0, 120)}`, userName(req));
+    await logAudit(pool, 'invoices', invoiceId, type === 'Credit' ? 'credit-note' : 'debit-note', `${type} note ${no} of ₹${total} issued (pending approval)`, userName(req));
+    res.json({ id, no, total, docStatus: 'Pending' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -128,5 +128,20 @@ export const api = {
   userAdmin: {
     meta: (id) => req('GET', `/user-admin/${id}/meta`),
     resetPassword: (id, newPassword) => req('POST', `/user-admin/${id}/reset-password`, { newPassword })
-  }
+  },
+  /* v4: maker–checker workflow, record activity & comments, global search, workspace stats */
+  wf: {
+    submit: (type, id) => req('POST', `/wf/${type}/${id}/submit`),
+    approve: (type, id) => req('POST', `/wf/${type}/${id}/approve`),
+    reject: (type, id, reason) => req('POST', `/wf/${type}/${id}/reject`, { reason }),
+    approveAll: (type) => req('POST', `/wf/${type}/approve-all`),
+    pendingCounts: () => req('GET', '/wf/pending-counts')
+  },
+  activity: (type, id) => req('GET', `/activity/${type}/${id}`),
+  comments: {
+    list: (type, id) => req('GET', `/comments/${type}/${id}`),
+    add: (type, id, body) => req('POST', `/comments/${type}/${id}`, { body })
+  },
+  search: (q) => req('GET', `/search?q=${encodeURIComponent(q)}`),
+  stats: { workspace: () => req('GET', '/stats/workspace') }
 };

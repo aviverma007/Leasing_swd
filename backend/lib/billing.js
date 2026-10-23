@@ -45,7 +45,7 @@ async function invoiceExists(pool, leaseId, ym, type) {
   return r.recordset[0].cnt > 0;
 }
 
-async function pushInvoice(pool, lease, type, desc, amount, ym, due) {
+async function pushInvoice(pool, lease, type, desc, amount, ym, due, by) {
   if (amount <= 0) return 0;
   const gstPct = Number(lease.Gst) || 0;
   const igst = lease.IgstApplicable === true || lease.IgstApplicable === 1;
@@ -66,32 +66,37 @@ async function pushInvoice(pool, lease, type, desc, amount, ym, due) {
     .input('ackNo', sql.VarChar(20), String(Math.floor(1e11 + Math.random() * 9e11)))
     .input('ackDate', sql.DateTime2, new Date())
     .input('pos', sql.NVarChar(60), 'HARYANA')
+    .input('by', sql.NVarChar(150), by || 'system')
     .query(`INSERT INTO ${SCHEMA}.Invoices
-      (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays,AckNo,AckDate,PlaceOfSupply)
-      VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays,@ackNo,@ackDate,@pos)`);
+      (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays,AckNo,AckDate,PlaceOfSupply,DocStatus,CreatedBy,CreatedAt)
+      VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays,@ackNo,@ackDate,@pos,'Pending',@by,SYSDATETIME())`);
+  try {
+    const { logAudit } = require('./audit');
+    await logAudit(pool, 'invoices', id, 'created', `Invoice ${no} (${type}) ${desc} — ₹${total} for ${ym}`, by || 'system');
+  } catch (_) { /* best-effort */ }
   return 1;
 }
 
-async function genLeaseInvoices(pool, leaseId, ym) {
+async function genLeaseInvoices(pool, leaseId, ym, by) {
   const lease = await getLease(pool, leaseId);
   if (!lease) return 0;
   const unit = await getUnit(pool, lease.UnitId);
   const { s: due } = monthRange(ym);
   let made = 0;
   if (['MG', 'MGvsRS'].includes(lease.RentalType) && !(await invoiceExists(pool, leaseId, ym, 'MG'))) {
-    made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}`, mgAmount(lease, unit, ym), ym, due);
+    made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}`, mgAmount(lease, unit, ym), ym, due, by);
   }
   if (Number(lease.Cam) > 0 && !(await invoiceExists(pool, leaseId, ym, 'CAM'))) {
-    made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${ym}`, Number(lease.Cam) * Number(unit.BuiltupArea), ym, due);
+    made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${ym}`, Number(lease.Cam) * Number(unit.BuiltupArea), ym, due, by);
   }
   if (Number(lease.Utility) > 0 && !(await invoiceExists(pool, leaseId, ym, 'Utility'))) {
-    made += await pushInvoice(pool, lease, 'Utility', `Utility charges — ${ym}`, Number(lease.Utility) * Number(unit.BuiltupArea), ym, due);
+    made += await pushInvoice(pool, lease, 'Utility', `Utility charges — ${ym}`, Number(lease.Utility) * Number(unit.BuiltupArea), ym, due, by);
   }
-  await syncRevShare(pool, leaseId, ym);
+  await syncRevShare(pool, leaseId, ym, by);
   return made;
 }
 
-async function syncRevShare(pool, leaseId, ym) {
+async function syncRevShare(pool, leaseId, ym, by) {
   const lease = await getLease(pool, leaseId);
   if (!lease || !['PureRS', 'MGvsRS', 'VarRS'].includes(lease.RentalType)) return;
   const unit = await getUnit(pool, lease.UnitId);
@@ -126,7 +131,7 @@ async function syncRevShare(pool, leaseId, ym) {
       .query(`UPDATE ${SCHEMA}.Invoices SET Amount=@amount, GstAmt=@gstAmt, CgstAmt=@cgstAmt, SgstAmt=@sgstAmt, IgstAmt=@igstAmt, Total=@total, Descr=@desc WHERE Id=@id`);
   } else {
     const { s: due } = monthRange(ym);
-    await pushInvoice(pool, lease, 'RevShare', desc, billable, ym, due);
+    await pushInvoice(pool, lease, 'RevShare', desc, billable, ym, due, by);
   }
 }
 
