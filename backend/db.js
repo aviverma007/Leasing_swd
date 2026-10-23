@@ -34,6 +34,12 @@ function getPool() {
         } catch (e) {
           console.error('[autoMigrate] skipped:', e.message);
         }
+        try {
+          const { loadRoleProfiles } = require('./lib/permissions');
+          await loadRoleProfiles(pool, SCHEMA);
+        } catch (e) {
+          console.error('[roles] load skipped:', e.message);
+        }
         return pool;
       })
       .catch(err => {

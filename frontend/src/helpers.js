@@ -219,7 +219,8 @@ export const NAV = [
   { v: 'agreementrecon', label: 'Agreement Recon' },
   { v: 'sdrecon', label: 'SD Reconciliation' },
   { grp: 'Admin' },
-  { v: 'deletions', label: 'Pending Deletions' }
+  { v: 'deletions', label: 'Pending Deletions' },
+  { v: 'roleprofiles', label: 'Role Profiles' }
 ];
 
 export const PAGES = {
@@ -249,5 +250,6 @@ export const PAGES = {
   tdsrecon: { t: 'TDS Reconciliation', s: 'TDS deducted on collections — for Form 26Q / 27Q' },
   agreementrecon: { t: 'Agreement Reconciliation', s: 'Lease terms vs actual billing per brand and unit' },
   sdrecon: { t: 'Security Deposit Reconciliation', s: 'SD agreed, collected, adjusted and balance per lease' },
-  deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' }
+  deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' },
+  roleprofiles: { t: 'Role Profiles', s: 'Define what each role can view or edit — Admin always has full access' }
 };

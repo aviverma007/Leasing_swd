@@ -49,6 +49,8 @@ const BASE_COLUMNS = [
   ['Units', 'CoveredArea', 'DECIMAL(18,2) NULL'],
   // ── v3: separated masters & lifecycle ──
   ['Units', 'CustomerId', 'VARCHAR(40) NULL'],
+  ['Leases', 'RenewedToId', 'VARCHAR(40) NULL'],
+  ['Leases', 'ExitDate', 'DATE NULL'],
   ['Leases', 'BrokerId', 'VARCHAR(40) NULL'],
   ['Leases', 'LifecycleStage', "VARCHAR(30) NOT NULL DEFAULT 'Active'"],
   ['Brands', 'LesseeCompanyNote', 'NVARCHAR(300) NULL']
@@ -95,6 +97,24 @@ const TABLES = [
       SizeBytes BIGINT NULL,
       UploadedBy NVARCHAR(150) NULL,
       UploadedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
+  ['RoleProfiles', `CREATE TABLE {S}.RoleProfiles(
+      Id VARCHAR(40) PRIMARY KEY,
+      Name NVARCHAR(100) UNIQUE NOT NULL,
+      AccessJson NVARCHAR(MAX) NOT NULL,
+      CanApprove BIT NOT NULL DEFAULT 0,
+      BuiltIn BIT NOT NULL DEFAULT 0)`],
+  ['LeaseSettlements', `CREATE TABLE {S}.LeaseSettlements(
+      Id VARCHAR(40) PRIMARY KEY,
+      LeaseId VARCHAR(40) NOT NULL,
+      ExitDate DATE NOT NULL,
+      SdHeld DECIMAL(18,2) NOT NULL DEFAULT 0,
+      Outstanding DECIMAL(18,2) NOT NULL DEFAULT 0,
+      DeductionsJson NVARCHAR(MAX) NULL,
+      TotalDeductions DECIMAL(18,2) NOT NULL DEFAULT 0,
+      NetRefund DECIMAL(18,2) NOT NULL DEFAULT 0,
+      Remarks NVARCHAR(500) NULL,
+      CreatedBy NVARCHAR(150) NULL,
+      CreatedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
   ['LeaseStageLog', `CREATE TABLE {S}.LeaseStageLog(
       Id VARCHAR(40) PRIMARY KEY,
       LeaseId VARCHAR(40) NOT NULL,
@@ -147,6 +167,24 @@ async function autoMigrate(pool, sql, SCHEMA) {
       }
     } catch (e) { failed++; console.error(`[autoMigrate] table ${SCHEMA}.${name}:`, e.message); }
   }
+  // Seed role profiles from the static matrix (once; Admin locked as BuiltIn full-access)
+  try {
+    const cnt = await pool.request().query(`SELECT COUNT(*) c FROM ${SCHEMA}.RoleProfiles`);
+    if (cnt.recordset[0].c === 0) {
+      const { ACCESS, APPROVER_ROLES } = require('./permissions');
+      for (const [name, acc] of Object.entries(ACCESS)) {
+        await pool.request()
+          .input('id', 'rp-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+          .input('n', name)
+          .input('j', JSON.stringify(acc))
+          .input('ap', APPROVER_ROLES.includes(name) ? 1 : 0)
+          .input('bi', name === 'Admin' ? 1 : 0)
+          .query(`INSERT INTO ${SCHEMA}.RoleProfiles (Id,Name,AccessJson,CanApprove,BuiltIn) VALUES (@id,@n,@j,@ap,@bi)`);
+      }
+      console.log('[autoMigrate] seeded role profiles from the static access matrix');
+    }
+  } catch (e) { failed++; console.error('[autoMigrate] role seed:', e.message); }
+
   // One-time: promote free-text Unit.Owner into the Customers master and link units.
   try {
     const pending = await pool.request().query(`

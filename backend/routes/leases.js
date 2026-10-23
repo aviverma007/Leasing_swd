@@ -193,4 +193,118 @@ router.get('/:id/stage-log', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* ── Exit / SD-refund settlement ──
+   Computes outstanding (net of receipts & credit notes), applies deductions,
+   records the settlement, marks the lease Exited and frees the unit. */
+router.post('/:id/exit', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const { exitDate, deductions, remarks } = req.body;
+    const lr = await pool.request().input('id', sql.VarChar(40), req.params.id)
+      .query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
+    const lease = lr.recordset[0];
+    if (!lease) return res.status(404).json({ error: 'Lease not found' });
+    if ((lease.LifecycleStage || 'Active') === 'Exited') return res.status(400).json({ error: 'Lease is already exited.' });
+
+    const or_ = await pool.request().input('l', sql.VarChar(40), req.params.id).query(`
+      SELECT ISNULL(SUM(i.Total),0) - ISNULL(SUM(p.paid),0) - ISNULL(SUM(cn.credited),0) AS outstanding
+      FROM ${SCHEMA}.Invoices i
+      OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id) p
+      OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id) cn
+      WHERE i.LeaseId=@l`);
+    const outstanding = Math.round((Number(or_.recordset[0].outstanding) || 0) * 100) / 100;
+    const sdHeld = Number(lease.Deposit) || 0;
+    const dedList = Array.isArray(deductions) ? deductions
+      .map(d => ({ label: String(d.label || '').slice(0, 120), amount: Math.round((Number(d.amount) || 0) * 100) / 100 }))
+      .filter(d => d.amount > 0) : [];
+    const totalDed = Math.round(dedList.reduce((s2, d) => s2 + d.amount, 0) * 100) / 100;
+    const netRefund = Math.round((sdHeld - outstanding - totalDed) * 100) / 100;
+    const by = req.user ? (req.user.email || req.user.username || 'system') : 'system';
+    const xd = exitDate || new Date().toISOString().slice(0, 10);
+
+    const sid = uid();
+    await pool.request()
+      .input('id', sql.VarChar(40), sid).input('l', sql.VarChar(40), req.params.id)
+      .input('xd', sql.Date, xd).input('sd', sql.Decimal(18, 2), sdHeld)
+      .input('out', sql.Decimal(18, 2), outstanding)
+      .input('dj', sql.NVarChar(sql.MAX), JSON.stringify(dedList))
+      .input('td', sql.Decimal(18, 2), totalDed).input('nr', sql.Decimal(18, 2), netRefund)
+      .input('rm', sql.NVarChar(500), (remarks || '').slice(0, 500)).input('by', sql.NVarChar(150), by)
+      .query(`INSERT INTO ${SCHEMA}.LeaseSettlements (Id,LeaseId,ExitDate,SdHeld,Outstanding,DeductionsJson,TotalDeductions,NetRefund,Remarks,CreatedBy)
+              VALUES (@id,@l,@xd,@sd,@out,@dj,@td,@nr,@rm,@by)`);
+    await pool.request().input('id', sql.VarChar(40), req.params.id).input('xd', sql.Date, xd)
+      .query(`UPDATE ${SCHEMA}.Leases SET LifecycleStage='Exited', Status='Closed', OnHold=0, ExitDate=@xd WHERE Id=@id`);
+    await pool.request().input('u', sql.VarChar(40), lease.UnitId)
+      .query(`UPDATE ${SCHEMA}.Units SET Status='Vacant' WHERE Id=@u`);
+    await pool.request()
+      .input('lid', sql.VarChar(40), uid()).input('l', sql.VarChar(40), req.params.id)
+      .input('f', sql.VarChar(30), lease.LifecycleStage || 'Active').input('t', sql.VarChar(30), 'Exited')
+      .input('by', sql.NVarChar(150), by).input('rm', sql.NVarChar(400), `Exit settlement: SD ${sdHeld} − dues ${outstanding} − deductions ${totalDed} = refund ${netRefund}`)
+      .query(`INSERT INTO ${SCHEMA}.LeaseStageLog (Id,LeaseId,FromStage,ToStage,ChangedBy,Remarks) VALUES (@lid,@l,@f,@t,@by,@rm)`);
+    res.json({ settlementId: sid, sdHeld, outstanding, totalDeductions: totalDed, netRefund });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/:id/settlement', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('l', sql.VarChar(40), req.params.id)
+      .query(`SELECT TOP 1 * FROM ${SCHEMA}.LeaseSettlements WHERE LeaseId=@l ORDER BY CreatedAt DESC`);
+    if (!r.recordset.length) return res.json(null);
+    const x = r.recordset[0];
+    res.json({
+      exitDate: x.ExitDate.toISOString().slice(0, 10), sdHeld: Number(x.SdHeld), outstanding: Number(x.Outstanding),
+      deductions: JSON.parse(x.DeductionsJson || '[]'), totalDeductions: Number(x.TotalDeductions),
+      netRefund: Number(x.NetRefund), remarks: x.Remarks, by: x.CreatedBy
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── Renewal: clone the lease with new term & rent, link and close the old one ── */
+router.post('/:id/renew', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const { startDate, months, mg } = req.body;
+    if (!startDate || !months || Number(months) <= 0) return res.status(400).json({ error: 'Start date and term (months) are required.' });
+    const lr = await pool.request().input('id', sql.VarChar(40), req.params.id)
+      .query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
+    const old = lr.recordset[0];
+    if (!old) return res.status(404).json({ error: 'Lease not found' });
+    if (old.RenewedToId) return res.status(400).json({ error: 'This lease has already been renewed.' });
+
+    const newId = uid();
+    const newCode = await nextNo(pool, sql, 'LSE');
+    const endExclusive = addM(startDate, Number(months));
+    const endDate = iso(new Date(new Date(endExclusive + 'T00:00:00Z').getTime() - 86400000));
+    const newMg = mg != null && mg !== '' ? Number(mg) : Number(old.Mg);
+
+    // copy every column except the ones we explicitly set
+    const colsR = await pool.request().query(`
+      SELECT c.name FROM sys.columns c
+      JOIN sys.tables t ON t.object_id=c.object_id
+      JOIN sys.schemas sc ON sc.schema_id=t.schema_id
+      WHERE sc.name='${SCHEMA}' AND t.name='Leases'`);
+    const skip = new Set(['Id', 'Code', 'StartDate', 'EndDate', 'Mg', 'LifecycleStage', 'RenewedToId', 'ExitDate', 'OnHold', 'HoldRemarks', 'Status']);
+    const copyCols = colsR.recordset.map(c => c.name).filter(n => !skip.has(n));
+    const colList = copyCols.map(c => `[${c}]`).join(',');
+
+    await pool.request()
+      .input('nid', sql.VarChar(40), newId).input('nc', sql.VarChar(20), newCode)
+      .input('s', sql.Date, startDate).input('e', sql.Date, endDate)
+      .input('mg', sql.Decimal(18, 2), newMg).input('oid', sql.VarChar(40), req.params.id)
+      .query(`INSERT INTO ${SCHEMA}.Leases (Id,Code,StartDate,EndDate,Mg,LifecycleStage,RenewedToId,ExitDate,OnHold,HoldRemarks,Status,${colList})
+              SELECT @nid,@nc,@s,@e,@mg,'Active',NULL,NULL,0,NULL,'Active',${colList}
+              FROM ${SCHEMA}.Leases WHERE Id=@oid`);
+    await pool.request().input('id', sql.VarChar(40), req.params.id).input('nid', sql.VarChar(40), newId)
+      .query(`UPDATE ${SCHEMA}.Leases SET LifecycleStage='Renewed', Status='Closed', RenewedToId=@nid WHERE Id=@id`);
+    const by = req.user ? (req.user.email || req.user.username || 'system') : 'system';
+    await pool.request()
+      .input('lid', sql.VarChar(40), uid()).input('l', sql.VarChar(40), req.params.id)
+      .input('f', sql.VarChar(30), old.LifecycleStage || 'Active').input('t', sql.VarChar(30), 'Renewed')
+      .input('by', sql.NVarChar(150), by).input('rm', sql.NVarChar(400), `Renewed as ${newCode} from ${startDate} at MG ${newMg}`)
+      .query(`INSERT INTO ${SCHEMA}.LeaseStageLog (Id,LeaseId,FromStage,ToStage,ChangedBy,Remarks) VALUES (@lid,@l,@f,@t,@by,@rm)`);
+    res.json({ id: newId, code: newCode, startDate, endDate, mg: newMg });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;

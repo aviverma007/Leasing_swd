@@ -41,14 +41,35 @@ export const ACCESS = {
 
 export const APPROVER_ROLES = ['Admin', 'Finance Head', 'Center/Portfolio Head'];
 
-const MODULE_ALIAS = { home: 'dashboard', customers: 'units', brokers: 'brands', ledger: 'collectionmaster', gstrecon: 'reports', tdsrecon: 'reports', agreementrecon: 'reports', sdrecon: 'reports', reportcenter: 'reports' };
+const MODULE_ALIAS = { home: 'dashboard', customers: 'units', brokers: 'brands', ledger: 'collectionmaster', roleprofiles: 'users', gstrecon: 'reports', tdsrecon: 'reports', agreementrecon: 'reports', sdrecon: 'reports', reportcenter: 'reports' };
+
+/* Runtime (DB-driven) role matrix — loaded after login from /api/roles.
+   The static ACCESS above stays as the fallback; Admin is always full access. */
+let DYN = null;
+let DYN_APPROVERS = null;
+export function setAccessMatrix(roles) {
+  DYN = {}; DYN_APPROVERS = new Set(['Admin']);
+  (roles || []).forEach((r) => {
+    DYN[r.name] = r.access || {};
+    if (r.canApprove) DYN_APPROVERS.add(r.name);
+  });
+}
+export function dynamicRoleNames() {
+  return DYN ? Object.keys(DYN) : null;
+}
 
 export function accessFor(role, module) {
+  const m = MODULE_ALIAS[module] || module;
+  if (role === 'Admin') return 'edit';
+  if (DYN && DYN[role]) return DYN[role][m] || 'none';
   const r = ACCESS[role];
   if (!r) return 'none';
-  const m = MODULE_ALIAS[module] || module;
   return r[m] || 'none';
 }
 export function canView(role, module) { return accessFor(role, module) !== 'none'; }
 export function canEdit(role, module) { return accessFor(role, module) === 'edit'; }
-export function canApproveRole(role) { return APPROVER_ROLES.includes(role); }
+export function canApproveRole(role) {
+  if (role === 'Admin') return true;
+  if (DYN_APPROVERS) return DYN_APPROVERS.has(role);
+  return APPROVER_ROLES.includes(role);
+}

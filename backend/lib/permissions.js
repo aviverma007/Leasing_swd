@@ -46,13 +46,40 @@ const ACCESS = {
 // Only these roles can approve investor units & disbursements
 const APPROVER_ROLES = ['Admin', 'Finance Head', 'Center/Portfolio Head'];
 
+/* ── Dynamic role profiles (DB-driven) ──
+   loadRoleProfiles(pool, SCHEMA) fills this cache at startup and whenever the
+   admin edits a role. Static ACCESS above remains the fallback, and the Admin
+   role is always full-access regardless of what the table says. */
+let DYNAMIC = null; // { roleName: { access: {module: level}, canApprove: bool } }
+
+async function loadRoleProfiles(pool, SCHEMA) {
+  const r = await pool.request().query(`SELECT Name, AccessJson, CanApprove FROM ${SCHEMA}.RoleProfiles`);
+  const map = {};
+  for (const row of r.recordset) {
+    try { map[row.Name] = { access: JSON.parse(row.AccessJson || '{}'), canApprove: !!row.CanApprove }; }
+    catch (_) { /* skip bad row */ }
+  }
+  if (Object.keys(map).length) DYNAMIC = map;
+  console.log(`[roles] ${Object.keys(map).length} role profile(s) loaded`);
+  return map;
+}
+
 function accessFor(role, module) {
+  if (role === 'Admin') return 'edit'; // admin profile always does everything
+  if (DYNAMIC && DYNAMIC[role]) return DYNAMIC[role].access[module] || 'none';
   const r = ACCESS[role];
   if (!r) return 'none';
   return r[module] || 'none';
 }
 function canView(role, module) { return accessFor(role, module) !== 'none'; }
 function canEdit(role, module) { return accessFor(role, module) === 'edit'; }
-function canApprove(role) { return APPROVER_ROLES.includes(role); }
+function canApprove(role) {
+  if (role === 'Admin') return true;
+  if (DYNAMIC && DYNAMIC[role]) return DYNAMIC[role].canApprove;
+  return APPROVER_ROLES.includes(role);
+}
+function roleNames() {
+  return DYNAMIC ? Object.keys(DYNAMIC) : Object.keys(ACCESS);
+}
 
-module.exports = { MODULES, ACCESS, APPROVER_ROLES, accessFor, canView, canEdit, canApprove };
+module.exports = { MODULES, ACCESS, APPROVER_ROLES, accessFor, canView, canEdit, canApprove, loadRoleProfiles, roleNames };

@@ -48,11 +48,20 @@ export const api = {
   brands: crud('/brands'),
   users: crud('/users'),
   customers: crud('/customers'),
+  roles: {
+    list: () => req('GET', '/roles'),
+    create: (body) => req('POST', '/roles', body),
+    update: (id, body) => req('PUT', `/roles/${id}`, body),
+    remove: (id) => req('DELETE', `/roles/${id}`)
+  },
   brokers: crud('/brokers'),
   leases: {
     ...crud('/leases'),
     hold: (id, remarks) => req('POST', `/leases/${id}/hold`, { remarks }),
     setStage: (id, stage, remarks) => req('POST', `/leases/${id}/stage`, { stage, remarks }),
+    exit: (id, body) => req('POST', `/leases/${id}/exit`, body),
+    renew: (id, body) => req('POST', `/leases/${id}/renew`, body),
+    settlement: (id) => req('GET', `/leases/${id}/settlement`),
     stageLog: (id) => req('GET', `/leases/${id}/stage-log`),
     setAlerts: (id, enabled) => req('POST', `/leases/${id}/alerts`, { enabled }),
     release: (id) => req('POST', `/leases/${id}/release`)

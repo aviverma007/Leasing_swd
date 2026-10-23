@@ -7,7 +7,7 @@ import {
   money, money0, fmtDate, ymLabel, curYM, addMonths, nameOf, findById, toCSV, download,
   CATEGORIES, ROLES, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES, LIFECYCLE_STAGES
 } from './helpers.js';
-import { canView, canEdit, canApproveRole } from './permissions.js';
+import { canView, canEdit, canApproveRole, setAccessMatrix } from './permissions.js';
 
 const EMPTY_DB = {
   companies: [], assets: [], blocks: [], units: [], brands: [], users: [], customers: [], brokers: [],
@@ -27,6 +27,18 @@ export default function App() {
   const roleRef = useRef(actingRole);
   useEffect(() => { roleRef.current = actingRole; }, [actingRole]);
   const [modal, setModal] = useState(null); // {type, id, ...}
+  const [roleNames, setRoleNames] = useState(['Admin', ...ROLES]);
+  const loadRoles = useCallback(async () => {
+    try {
+      const { roles } = await api.roles.list();
+      setAccessMatrix(roles);
+      const names = roles.map((r) => r.name);
+      setRoleNames(names.includes('Admin') ? names : ['Admin', ...names]);
+      // user-master role dropdown follows the live profiles (users can't be 'Admin' — that's the env login)
+      const roleField = MASTER_SCHEMA.users.fields.find((f) => f.k === 'role');
+      if (roleField) roleField.opts = names.filter((n) => n !== 'Admin');
+    } catch (_) { /* fall back to the static matrix */ }
+  }, []);
   const [toast, setToast] = useState(null);
   const [railOpen, setRailOpen] = useState(false);
 
@@ -83,6 +95,7 @@ export default function App() {
 
   const onLogin = (user) => {
     setAuthUser(user);
+    loadRoles();
     // Admin operates as the 'Admin' role in the access matrix; others use their profile role
     setActingRole(user.isAdmin ? 'Admin' : (user.role || 'Manager'));
   };
@@ -111,6 +124,7 @@ export default function App() {
           const { user } = await api.auth.me();
           setAuthUser(user);
           setActingRole(user.isAdmin ? 'Admin' : (user.role || 'Manager'));
+          loadRoles();
         } catch (e) {
           setToken(null); // token invalid/expired — force fresh login
         }
@@ -162,7 +176,7 @@ export default function App() {
             <>
               <label>Acting as</label>
               <select value={actingRole} onChange={(e) => { setActingRole(e.target.value); notify('Now acting as ' + e.target.value); }}>
-                {['Admin', ...ROLES].map((r) => <option key={r}>{r}</option>)}
+                {roleNames.map((r) => <option key={r}>{r}</option>)}
               </select>
             </>
           ) : (
@@ -197,7 +211,8 @@ export default function App() {
         <div className="wrap">
           {loading ? <div className="empty"><p>Loading…</p></div> : (
             <ViewRouter view={view} setView={setView} db={scopedDb} search={search} setSearch={setSearch} filterVal={filterVal} setFilterVal={setFilterVal}
-              actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} pendingDel={pendingDel} />
+              actingRole={actingRole} setModal={setModal} refresh={refresh} notify={notify} canEditView={canEdit(actingRole, view)} pendingDel={pendingDel}
+              isAdmin={!!authUser.isAdmin} onRolesChanged={loadRoles} />
           )}
         </div>
       </div>
@@ -249,6 +264,7 @@ function ViewRouter(props) {
   if (view === 'collections') return <CollectionsPage {...props} />;
   if (view === 'collectionmaster') return <CollectionMasterPage {...props} />;
   if (view === 'ledger') return <LedgerPage {...props} />;
+  if (view === 'roleprofiles') return <RoleProfilesPage {...props} />;
   if (view === 'investors') return <InvestorsPage {...props} />;
   if (view === 'investoraccounts') return <InvestorAccountsPage {...props} />;
   if (view === 'disbursement') return <DisbursementPage {...props} />;
@@ -556,6 +572,10 @@ function ModalRouter({ modal, db, setModal, refresh, notify, actingRole, isAdmin
       return <ResetPasswordModal user={modal.user} onClose={close} refresh={refresh} notify={notify} />;
     case 'lease':
       return <LeaseFormModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
+    case 'renewLease':
+      return <RenewLeaseModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
+    case 'exitLease':
+      return <ExitLeaseModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'leaseStage':
       return <LeaseStageModal id={modal.id} db={db} onClose={close} refresh={refresh} notify={notify} />;
     case 'creditNote':
@@ -1023,6 +1043,12 @@ function LeasesPage({ db, search, setSearch, setModal, refresh, notify, canEditV
                   <td className="rowact">
                     {pendingIds.has(l.id) ? <Pill color="amber">Deletion pending</Pill> : canEditView ? (
                       <>
+                        {!['Exited', 'Renewed'].includes(l.lifecycleStage) && (
+                          <>
+                            <button className="btn btn-ghost btn-sm" title="Renew this lease into a new term" onClick={() => setModal({ type: 'renewLease', id: l.id })}>Renew</button>
+                            <button className="btn btn-ghost btn-sm" title="Exit: settle SD and vacate the unit" onClick={() => setModal({ type: 'exitLease', id: l.id })}>Exit</button>
+                          </>
+                        )}
                         {l.onHold
                           ? <button className="btn btn-ghost btn-sm" onClick={() => release(l.id)}>Release</button>
                           : <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'holdLease', id: l.id })}>Hold</button>}
@@ -2056,6 +2082,211 @@ function TaxInvoiceView({ i, inv, landlord, tenant, unit, asset, igstMode, gstPc
         <div className="sub" style={{ fontStyle: 'italic' }}>This is a computer-generated invoice — no physical/digital signature required.</div>
       </div>
     </div>
+  );
+}
+
+/* Renewal: clone into a new term with escalated rent */
+function RenewLeaseModal({ id, db, onClose, refresh, notify }) {
+  const lease = findById(db.leases, id);
+  const nextDay = (d) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+  const suggMg = lease && lease.esc > 0 ? Math.round(lease.mg * (1 + lease.esc / 100) * 100) / 100 : lease?.mg;
+  const [startDate, setStartDate] = React.useState(lease ? nextDay(lease.endDate) : '');
+  const [months, setMonths] = React.useState(36);
+  const [mg, setMg] = React.useState(suggMg ?? '');
+  const [busy, setBusy] = React.useState(false);
+  if (!lease) return null;
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api.leases.renew(id, { startDate, months: Number(months), mg: Number(mg) });
+      await refresh(['leases', 'units', 'invoices']);
+      notify(`Renewed as ${r.code} — ${fmtDate(r.startDate)} → ${fmtDate(r.endDate)} at MG ₹${Number(r.mg).toLocaleString('en-IN')}.`);
+      onClose();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Renew lease — ${lease.code} (${nameOf(db.brands, lease.brandId)})`} onClose={onClose} onSave={save} saveLabel={busy ? 'Renewing…' : 'Create renewal'}>
+      <Callout>Creates a fresh lease with all terms copied, the old one marked <b>Renewed</b> and linked.
+        Current: MG ₹{Number(lease.mg).toLocaleString('en-IN')}{lease.mgBasis === 'PerSqFt' ? '/sq ft' : ''} · expires {fmtDate(lease.endDate)}
+        {lease.esc > 0 ? ` · suggested new MG applies the ${lease.esc}% escalation` : ''}.</Callout>
+      <div className="grp3">
+        <div className="field"><label>New start date <span className="req">*</span></label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
+        <div className="field"><label>Term (months) <span className="req">*</span></label><input type="number" value={months} onChange={(e) => setMonths(e.target.value)} /></div>
+        <div className="field"><label>New MG (₹{lease.mgBasis === 'PerSqFt' ? '/sq ft' : ' lumpsum'})</label><input type="number" step="0.01" value={mg} onChange={(e) => setMg(e.target.value)} /></div>
+      </div>
+    </Modal>
+  );
+}
+
+/* Exit: SD-refund settlement with deductions */
+function ExitLeaseModal({ id, db, onClose, refresh, notify }) {
+  const lease = findById(db.leases, id);
+  const [exitDate, setExitDate] = React.useState(new Date().toISOString().slice(0, 10));
+  const [remarks, setRemarks] = React.useState('');
+  const [ded, setDed] = React.useState([{ label: 'Restoration / repairs', amount: '' }]);
+  const [busy, setBusy] = React.useState(false);
+  if (!lease) return null;
+  const outstanding = Math.round(db.invoices.filter((i) => i.leaseId === id)
+    .reduce((s2, i) => s2 + (i.balance ?? (i.total - (i.paid || 0) - (i.credited || 0))), 0) * 100) / 100;
+  const sdHeld = Number(lease.deposit) || 0;
+  const totalDed = Math.round(ded.reduce((s2, d) => s2 + (Number(d.amount) || 0), 0) * 100) / 100;
+  const netRefund = Math.round((sdHeld - outstanding - totalDed) * 100) / 100;
+  const setD = (i, k, v) => setDed((rows) => rows.map((r, idx) => idx === i ? { ...r, [k]: v } : r));
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api.leases.exit(id, { exitDate, remarks, deductions: ded.filter((d) => Number(d.amount) > 0) });
+      await refresh(['leases', 'units', 'invoices']);
+      notify(`Exit settled: refund ${r.netRefund >= 0 ? '₹' + r.netRefund.toLocaleString('en-IN') + ' payable to tenant' : '₹' + Math.abs(r.netRefund).toLocaleString('en-IN') + ' recoverable from tenant'}. Unit is now vacant.`);
+      onClose();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Exit & SD settlement — ${lease.code} (${nameOf(db.brands, lease.brandId)})`} onClose={onClose} onSave={save} saveLabel={busy ? 'Settling…' : 'Confirm exit & settle'} wide>
+      <Callout>Marks the lease <b>Exited</b>, frees the unit, and records the settlement below in the register. Clear pending receipts/credit notes first if the dues figure looks wrong.</Callout>
+      <div className="grp2">
+        <div className="field"><label>Exit / vacate date</label><input type="date" value={exitDate} onChange={(e) => setExitDate(e.target.value)} /></div>
+        <div className="field"><label>Remarks</label><input value={remarks} placeholder="e.g. Keys received, unit inspected" onChange={(e) => setRemarks(e.target.value)} /></div>
+      </div>
+      <div className="sectlabel">Deductions from deposit</div>
+      {ded.map((d, i) => (
+        <div className="grp3" key={i}>
+          <div className="field" style={{ gridColumn: 'span 2' }}><input value={d.label} placeholder="Deduction description" onChange={(e) => setD(i, 'label', e.target.value)} /></div>
+          <div className="field"><input type="number" value={d.amount} placeholder="₹" onChange={(e) => setD(i, 'amount', e.target.value)} /></div>
+        </div>
+      ))}
+      <button className="btn btn-ghost btn-sm" onClick={() => setDed((r) => [...r, { label: '', amount: '' }])}>+ Add deduction</button>
+      <table className="ledger" style={{ width: 340, marginTop: 14 }}>
+        <tbody>
+          <tr><td>Security deposit held</td><td className="r">{money(sdHeld)}</td></tr>
+          <tr><td>Less: outstanding dues</td><td className="r">({money(outstanding)})</td></tr>
+          <tr><td>Less: deductions</td><td className="r">({money(totalDed)})</td></tr>
+          <tr className="tot"><td><b>{netRefund >= 0 ? 'Net refund to tenant' : 'Recoverable from tenant'}</b></td>
+            <td className="r"><b style={{ color: netRefund >= 0 ? 'var(--green)' : 'var(--amber)' }}>{money(Math.abs(netRefund))}</b></td></tr>
+        </tbody>
+      </table>
+    </Modal>
+  );
+}
+
+/* Role Profiles — admin-editable access matrix */
+function RoleProfilesPage({ db, notify, isAdmin, onRolesChanged }) {
+  const [data, setData] = React.useState(null);
+  const [sel, setSel] = React.useState('');
+  const [grid, setGrid] = React.useState({});
+  const [canApprove, setCanApprove] = React.useState(false);
+  const [newName, setNewName] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+
+  const load = async (keepSel) => {
+    try {
+      const d = await api.roles.list();
+      setData(d);
+      const pick = keepSel && d.roles.find((r) => r.id === keepSel) ? keepSel : (d.roles.find((r) => r.name !== 'Admin')?.id || d.roles[0]?.id || '');
+      selectRole(pick, d);
+    } catch (e) { notify(e.message, true); }
+  };
+  const selectRole = (id, d) => {
+    const dd = d || data;
+    setSel(id);
+    const r = dd?.roles.find((x) => x.id === id);
+    if (r) { setGrid({ ...r.access }); setCanApprove(!!r.canApprove); }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  if (!data) return <div className="empty"><p>Loading role profiles…</p></div>;
+  const role = data.roles.find((r) => r.id === sel);
+  const locked = !isAdmin || (role && role.name === 'Admin');
+
+  const MODULE_LABEL = {
+    dashboard: 'Dashboard', inventory: 'Inventory', collectionmaster: 'Collection Master', investoraccounts: 'Investor Accounts',
+    deletions: 'Pending Deletions', companies: 'Lessee Companies', assets: 'Projects', blocks: 'Blocks',
+    units: 'Units & Customers', brands: 'Brands & Brokers', users: 'Users & Role Profiles', leases: 'Leases',
+    sales: 'Sales (Rev share)', invoices: 'Invoices & Credit Notes', collections: 'Collections & Ledger',
+    investors: 'Investor Units', disbursement: 'Disbursement', reports: 'Reports'
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.roles.update(sel, { access: grid, canApprove });
+      notify(`Role '${role.name}' updated — applies on each user's next action.`);
+      await load(sel);
+      onRolesChanged && onRolesChanged();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  const createRole = async () => {
+    if (!newName.trim()) return notify('Enter a name for the new role.', true);
+    setBusy(true);
+    try {
+      const r = await api.roles.create({ name: newName.trim(), access: grid, canApprove });
+      notify(`Role '${newName.trim()}' created (copied from '${role?.name}').`);
+      setNewName('');
+      await load(r.id);
+      onRolesChanged && onRolesChanged();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  const removeRole = async () => {
+    setBusy(true);
+    try {
+      await api.roles.remove(sel);
+      notify(`Role '${role.name}' deleted.`);
+      await load();
+      onRolesChanged && onRolesChanged();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      {!isAdmin && <Callout>Only the admin can change role profiles — you are viewing them read-only.</Callout>}
+      <div className="toolbar" style={{ gap: 10, flexWrap: 'wrap' }}>
+        <div className="field" style={{ maxWidth: 280, margin: 0 }}>
+          <select value={sel} onChange={(e) => selectRole(e.target.value)}>
+            {data.roles.map((r) => <option key={r.id} value={r.id}>{r.name}{r.builtIn ? ' (built-in)' : ''}</option>)}
+          </select>
+        </div>
+        <label className="chk" style={{ margin: 0 }}>
+          <input type="checkbox" disabled={locked} checked={role?.name === 'Admin' ? true : canApprove} onChange={(e) => setCanApprove(e.target.checked)} />
+          Can approve (investor units & disbursals)
+        </label>
+        {isAdmin && role?.name !== 'Admin' && <button className="btn btn-teal btn-sm" disabled={busy} onClick={save}>Save role</button>}
+        {isAdmin && role && !role.builtIn && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={removeRole}>Delete role</button>}
+        {isAdmin && (
+          <span style={{ display: 'inline-flex', gap: 8, marginLeft: 'auto' }}>
+            <input style={{ width: 190 }} placeholder="New role name…" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={createRole}>+ Create from current grid</button>
+          </span>
+        )}
+      </div>
+      {role?.name === 'Admin' && <Callout>The <b>Admin</b> profile is locked: it always has full access to everything, including this screen.</Callout>}
+      <div className="tablewrap">
+        <table>
+          <thead><tr><th>Module</th><th>No access</th><th>View only</th><th>View + edit</th></tr></thead>
+          <tbody>
+            {data.modules.map((m) => {
+              const val = role?.name === 'Admin' ? 'edit' : (grid[m] || 'none');
+              return (
+                <tr key={m}>
+                  <td><b>{MODULE_LABEL[m] || m}</b></td>
+                  {['none', 'view', 'edit'].map((lv) => (
+                    <td key={lv}>
+                      <input type="radio" name={'rp-' + m} disabled={locked} checked={val === lv}
+                        onChange={() => setGrid((g) => ({ ...g, [m]: lv }))} />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

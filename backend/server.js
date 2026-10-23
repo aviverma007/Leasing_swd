@@ -46,6 +46,9 @@ app.get('/api/alerts', async (req, res) => { require('./routes/reports').handle 
 app.use('/api/customers', requireModule('units'), mastersRouter('customers'));
 app.use('/api/brokers', requireModule('brands'), mastersRouter('brokers'));
 
+// role profiles (read for all signed-in users; writes admin-only inside the route)
+app.use('/api/roles', require('./routes/roles'));
+
 // credit/debit notes, tenant ledger, lease document vault
 app.use('/api/credit-notes', requireModule('invoices'), require('./routes/creditNotes'));
 app.use('/api/ledger', requireModule('invoices'), require('./routes/ledger'));
@@ -58,4 +61,9 @@ app.use('/api/deletion-requests', require('./routes/deletionRequests'));
 app.use('/api/user-admin', require('./routes/userAdmin'));
 
 const PORT = process.env.PORT || 5096;
-app.listen(PORT, () => console.log(`Leasing & Billing API listening on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Leasing & Billing API listening on port ${PORT}`);
+  // arm the monthly auto-billing scheduler once the DB is reachable
+  getPool().then((pool) => require('./lib/scheduler').startScheduler(pool))
+    .catch((e) => console.error('[autobill] not armed (DB unreachable):', e.message));
+});
