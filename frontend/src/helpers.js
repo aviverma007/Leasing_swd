@@ -225,7 +225,8 @@ export const NAV = [
   { v: 'camtrueup', label: 'CAM True-up' },
   { grp: 'Admin' },
   { v: 'deletions', label: 'Pending Deletions' },
-  { v: 'roleprofiles', label: 'Role Profiles' }
+  { v: 'roleprofiles', label: 'Role Profiles' },
+  { v: 'auditlog', label: 'Audit Logs' }
 ];
 
 export const PAGES = {
@@ -259,5 +260,6 @@ export const PAGES = {
   sdrecon: { t: 'Security Deposit Reconciliation', s: 'SD agreed, collected, adjusted and balance per lease' },
   camtrueup: { t: 'CAM True-up', s: 'Year-end reconciliation — budgeted CAM billed vs actual cost per sq ft' },
   deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' },
-  roleprofiles: { t: 'Role Profiles', s: 'Define what each role can view or edit — Admin always has full access' }
+  roleprofiles: { t: 'Role Profiles', s: 'Define what each role can view or edit — Admin always has full access' },
+  auditlog: { t: 'Audit Logs', s: 'Every action by every user — logins, creations, edits, deletions, approvals, reminders' }
 };

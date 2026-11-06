@@ -354,6 +354,7 @@ function ViewRouter(props) {
   if (view === 'sdrecon') return <SdReconPage {...props} />;
   if (view === 'camtrueup') return <CamTrueupPage {...props} />;
   if (view === 'dunning') return <DunningPage {...props} />;
+  if (view === 'auditlog') return <AuditLogPage {...props} />;
   return null;
 }
 
@@ -3686,6 +3687,78 @@ function SdReconPage({ notify }) {
             </table>
           )}
         </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Audit Logs: every action by every user, filterable ── */
+const AUDIT_VIEW = { leases: 'leases', invoices: 'invoices', collections: 'collections', creditnotes: 'creditnotes', companies: 'companies', assets: 'assets', blocks: 'blocks', units: 'units', brands: 'brands', customers: 'customers', brokers: 'brokers', users: 'users' };
+function AuditLogPage({ setView, notify }) {
+  const [meta, setMeta] = React.useState({ users: [], types: [], actions: [] });
+  const [f, setF] = React.useState({ user: '', type: '', action: '', from: '', to: '', q: '', limit: 300 });
+  const [rows, setRows] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const load = async (filters) => {
+    setBusy(true);
+    try { setRows(await api.audit.list(filters || f)); }
+    catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { (async () => { try { setMeta(await api.audit.meta()); } catch (_) {} await load(); })(); }, []); // eslint-disable-line
+  const setFilter = (k, v) => { const nf = { ...f, [k]: v }; setF(nf); load(nf); };
+  const actPill = (a) => {
+    const map = { created: 'teal', edited: 'blue', deleted: 'red', 'delete-requested': 'amber', approved: 'green', rejected: 'red', submitted: 'amber', stage: 'violet', login: 'grey', 'login-failed': 'red', bounced: 'red', reminder: 'amber', renewed: 'teal', exited: 'violet' };
+    return <Pill color={map[a] || 'grey'}>{a}</Pill>;
+  };
+  const exportCSV = () => {
+    if (!rows) return;
+    download('audit_logs.csv', toCSV([['Time', 'User', 'Action', 'Record Type', 'Record Id', 'Detail'],
+      ...rows.map(r => [new Date(r.at).toLocaleString('en-GB'), r.by, r.action, r.entityType, r.entityId, r.detail || ''])]));
+    notify('Exported audit_logs.csv');
+  };
+  return (
+    <>
+      <Callout>Every recorded action in the system — who signed in, who created/edited/deleted what (field by field), every approval, rejection, stage move, receipt, bounce and reminder. Logs are written automatically and cannot be edited from the application.</Callout>
+      <div className="toolbar" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+        <select className="filt" style={{ maxWidth: 230 }} value={f.user} onChange={(e) => setFilter('user', e.target.value)}>
+          <option value="">All users</option>
+          {meta.users.map((u) => <option key={u}>{u}</option>)}
+        </select>
+        <select className="filt" style={{ maxWidth: 180 }} value={f.type} onChange={(e) => setFilter('type', e.target.value)}>
+          <option value="">All record types</option>
+          {meta.types.map((t) => <option key={t}>{t}</option>)}
+        </select>
+        <select className="filt" style={{ maxWidth: 160 }} value={f.action} onChange={(e) => setFilter('action', e.target.value)}>
+          <option value="">All actions</option>
+          {meta.actions.map((a) => <option key={a}>{a}</option>)}
+        </select>
+        <input type="date" className="filt" style={{ maxWidth: 160 }} value={f.from} onChange={(e) => setFilter('from', e.target.value)} title="From date" />
+        <input type="date" className="filt" style={{ maxWidth: 160 }} value={f.to} onChange={(e) => setFilter('to', e.target.value)} title="To date" />
+        <SearchBox placeholder="Search detail / record id…" value={f.q} onChange={(v) => setFilter('q', v)} />
+        <span className="listmeta"><span className="chip">{rows ? rows.length : '…'} entries</span></span>
+        <button className="btn btn-ghost btn-sm" onClick={exportCSV}>⬇ Excel CSV</button>
+      </div>
+      <div className="tablewrap">
+        {rows === null || busy ? <div className="empty"><p>Loading audit trail…</p></div> : rows.length === 0 ? <EmptyMini text="No log entries match these filters." /> : (
+          <table>
+            <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Record</th><th>Detail</th></tr></thead>
+            <tbody>
+              {rows.map((r) => {
+                const v = AUDIT_VIEW[r.entityType];
+                return (
+                  <tr key={r.id}>
+                    <td className="sub" style={{ whiteSpace: 'nowrap' }}>{new Date(r.at).toLocaleString('en-GB')}</td>
+                    <td><b>{r.by}</b></td>
+                    <td>{actPill(r.action)}</td>
+                    <td>{v ? <a onClick={() => setView(v, r.entityId)} style={{ cursor: 'pointer', color: 'var(--teal)' }}>{r.entityType}</a> : <span className="sub">{r.entityType}</span>}</td>
+                    <td className="sub" style={{ maxWidth: 520, wordBreak: 'break-word' }}>{r.detail}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );

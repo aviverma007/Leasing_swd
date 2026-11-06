@@ -19,9 +19,18 @@ router.post('/login', async (req, res) => {
     const { username, password } = req.body || {};
     if (!username || !password) return res.status(400).json({ error: 'Enter username and password.' });
 
+    const logLogin = async (id, action, detail, by) => {
+      try {
+        const pool = await getPool();
+        const { logAudit } = require('../lib/audit');
+        await logAudit(pool, 'auth', id, action, detail, by);
+      } catch (_) { /* audit is best-effort */ }
+    };
+
     // 1) Admin account from .env (not a DB row)
     if (ADMIN_PASSWORD && username === ADMIN_ID && password === ADMIN_PASSWORD) {
       const user = { id: 'admin', email: ADMIN_ID, role: 'Admin', isAdmin: true };
+      await logLogin('admin', 'login', 'Signed in (admin)', ADMIN_ID);
       return res.json({ token: sign(user), user });
     }
 
@@ -30,7 +39,7 @@ router.post('/login', async (req, res) => {
     const row = await pool.request().input('email', sql.NVarChar(200), username)
       .query(`SELECT TOP 1 * FROM ${SCHEMA}.Users WHERE Email=@email`);
     const u = row.recordset[0];
-    if (!u) return res.status(401).json({ error: 'Invalid username or password.' });
+    if (!u) { await logLogin('unknown', 'login-failed', `Failed sign-in attempt for '${String(username).slice(0, 100)}'`, String(username).slice(0, 100)); return res.status(401).json({ error: 'Invalid username or password.' }); }
     if ((u.Active || 'Active') !== 'Active') return res.status(403).json({ error: 'This account is inactive.' });
 
     const stored = u.Password || '';
@@ -42,9 +51,10 @@ router.post('/login', async (req, res) => {
       // legacy plaintext (seeded/older rows) — allow, so existing users can still log in
       ok = stored === password;
     }
-    if (!ok) return res.status(401).json({ error: 'Invalid username or password.' });
+    if (!ok) { await logLogin(u.Id, 'login-failed', `Failed sign-in attempt (wrong password) for ${u.Email}`, u.Email); return res.status(401).json({ error: 'Invalid username or password.' }); }
 
     const user = { id: u.Id, email: u.Email, role: u.Role, isAdmin: false };
+    await logLogin(u.Id, 'login', `Signed in (${u.Role})`, u.Email);
     return res.json({ token: sign(user), user });
   } catch (e) {
     res.status(500).json({ error: e.message });

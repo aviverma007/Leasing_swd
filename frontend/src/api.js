@@ -125,6 +125,13 @@ export const api = {
     camTrueup: (year, rate) => req('GET', `/reports/cam-trueup?year=${year}&rate=${rate}`),
     mgTrueup: (leaseId) => req('GET', `/reports/mg-trueup?leaseId=${leaseId}`)
   },
+  audit: {
+    meta: () => req('GET', '/audit/meta'),
+    list: (f) => {
+      const qs = Object.entries(f || {}).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+      return req('GET', '/audit' + (qs ? '?' + qs : ''));
+    }
+  },
   dunning: {
     list: () => req('GET', '/dunning'),
     log: (invoiceId) => req('GET', `/dunning/${invoiceId}/log`),
