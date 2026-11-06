@@ -68,12 +68,28 @@ function startScheduler(pool) {
   const tick = async () => {
     try {
       const now = new Date();
-      if (now.getDate() < day) return;
-      const ym = curYM();
-      if (await hasRun(pool, ym)) return;
-      console.log(`[autobill] billing day reached (>= ${day}) and ${ym} not yet billed — running…`);
-      await runAutoBilling(pool);
+      if (now.getDate() >= day) {
+        const ym = curYM();
+        if (!(await hasRun(pool, ym))) {
+          console.log(`[autobill] billing day reached (>= ${day}) and ${ym} not yet billed — running…`);
+          await runAutoBilling(pool);
+        }
+      }
     } catch (e) { console.error('[autobill] tick failed:', e.message); }
+    // v4.2 — daily dunning sweep (once per calendar day; DUNNING=0 disables)
+    try {
+      if (process.env.DUNNING !== '0') {
+        const dayKey = 'dunning_' + new Date().toISOString().slice(0, 10);
+        const r = await pool.request().input('k', sql.NVarChar(100), dayKey)
+          .query(`SELECT COUNT(*) c FROM ${SCHEMA}.Settings WHERE SettingKey=@k`);
+        if (r.recordset[0].c === 0) {
+          await pool.request().input('id', sql.VarChar(40), uid()).input('k', sql.NVarChar(100), dayKey).input('v', sql.NVarChar(sql.MAX), '{}')
+            .query(`INSERT INTO ${SCHEMA}.Settings (Id, SettingKey, Value) VALUES (@id, @k, @v)`);
+          const n = await require('./dunning').runDunning(pool);
+          console.log(`[dunning] daily sweep done — ${n} reminder(s)`);
+        }
+      }
+    } catch (e) { console.error('[dunning] tick failed:', e.message); }
   };
   setTimeout(tick, 20 * 1000); // first check shortly after boot
   setInterval(tick, CHECK_MS);

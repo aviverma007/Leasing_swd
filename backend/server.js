@@ -58,6 +58,7 @@ app.use('/api/lease-docs', requireModule('leases'), require('./routes/documents'
 app.use('/api/wf', require('./routes/workflow'));
 app.use('/api', require('./routes/activity')); // /api/activity/:type/:id + /api/comments/:type/:id
 app.use('/api/search', require('./routes/search'));
+app.use('/api/dunning', requireModule('collections'), require('./routes/dunning'));
 app.use('/api/stats', require('./routes/stats'));
 
 // deletion approval queue (route enforces admin-only for approve/reject internally)

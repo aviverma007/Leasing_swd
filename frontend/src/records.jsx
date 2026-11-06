@@ -175,6 +175,30 @@ function LeaseRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) 
   const l = findById(db.leases, id);
   const [stageLog, setStageLog] = useState([]);
   const [docs, setDocs] = useState(null);
+  const [trueup, setTrueup] = useState(null);
+  const [tuBusy, setTuBusy] = useState(false);
+  const computeTrueup = async () => {
+    setTuBusy(true);
+    try { setTrueup(await api.reports.mgTrueup(id)); }
+    catch (e) { notify(e.message, true); }
+    finally { setTuBusy(false); }
+  };
+  const raiseTrueup = async () => {
+    if (!trueup || trueup.totalDiff <= 0) return;
+    setTuBusy(true);
+    try {
+      const months = trueup.rows.filter(r => r.wasInterim).map(r => r.ym);
+      const res = await api.invoices.adhoc({
+        leaseId: id, ym: months[months.length - 1] || new Date().toISOString().slice(0, 7),
+        desc: `MG true-up (negotiation settled) — differential for ${months.join(', ')}`,
+        amount: trueup.totalDiff, gstPct: l.gst || 18
+      });
+      notify(`True-up invoice ${res.no} raised for ₹${trueup.totalDiff.toLocaleString('en-IN')} (pending approval).`);
+      await refresh(['invoices']);
+      await computeTrueup();
+    } catch (e) { notify(e.message, true); }
+    finally { setTuBusy(false); }
+  };
   useEffect(() => {
     (async () => {
       try { setStageLog(await api.leases.stageLog(id)); } catch (_) { /* ignore */ }
@@ -203,7 +227,7 @@ function LeaseRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) 
     <RecordShell go={go}
       crumbs={[{ label: 'Leasing', view: 'leases' }, { label: 'Leases', view: 'leases' }, { label: l.code }]}
       title={`${l.code} — ${brand?.name || '—'}`}
-      pills={<><DocStatusPill st={l.docStatus} /><Pill color="teal">{l.lifecycleStage || 'Active'}</Pill>{l.onHold && <Pill color="amber">On hold</Pill>}</>}
+      pills={<><DocStatusPill st={l.docStatus} /><Pill color="teal">{l.lifecycleStage || 'Active'}</Pill>{l.onHold && <Pill color="amber">On hold</Pill>}{l.negotiationMode && <Pill color="violet">MG under negotiation · {l.negotiationMode}</Pill>}</>}
       actions={edit && <>
         <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'leaseStage', id })}>Stage</button>
         {!['Exited', 'Renewed'].includes(l.lifecycleStage) && <>
@@ -234,6 +258,30 @@ function LeaseRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) 
               <KV label="Broker">{nameOf(db.brokers, l.brokerId)}</KV>
             </div>
           </RSection>
+          {(l.negotiationMode || trueup) && (
+            <RSection title="MG negotiation & true-up"
+              right={<button className="btn btn-ghost btn-sm" disabled={tuBusy} onClick={computeTrueup}>{tuBusy ? 'Computing…' : '⟳ Compute true-up'}</button>}>
+              {l.negotiationMode && <Callout warn>MG is under negotiation — mode: <b>{l.negotiationMode === 'InterimRate' ? `interim rate ₹${l.negotiatedMg}` : l.negotiationMode === 'RsOnly' ? 'revenue share only' : 'MG billing on hold'}</b>. When terms are final: set the final MG in Edit, clear the mode, then bill the differential below.</Callout>}
+              {trueup && (trueup.rows.length === 0 ? <div className="sub">No interim-billed months found yet.</div> : (
+                <>
+                  <table>
+                    <thead><tr><th>Month</th><th className="num">Billed</th><th className="num">Final MG</th><th className="num">Differential</th><th>Interim?</th></tr></thead>
+                    <tbody>{trueup.rows.map((r) => (
+                      <tr key={r.ym}><td>{ymLabel(r.ym)}</td><td className="num">{money0(r.billed)}</td><td className="num">{money0(r.finalMg)}</td>
+                        <td className="num strong" style={{ color: r.diff > 0 ? 'var(--amber)' : 'var(--green)' }}>{money0(r.diff)}</td>
+                        <td>{r.wasInterim ? <Pill color="violet">interim</Pill> : <span className="sub">—</span>}</td></tr>
+                    ))}</tbody>
+                  </table>
+                  <div className="int-strip" style={{ maxWidth: 'none' }}>
+                    <span>Total differential (interim months): <b>{money0(trueup.totalDiff)}</b></span>
+                    {canEdit(actingRole, 'invoices') && trueup.totalDiff > 0.5 && !l.negotiationMode &&
+                      <button className="btn btn-teal btn-sm" disabled={tuBusy} onClick={raiseTrueup}>Raise true-up invoice</button>}
+                    {trueup.totalDiff > 0.5 && l.negotiationMode && <span className="sub">clear the negotiation mode first (Edit → Commercial Terms)</span>}
+                  </div>
+                </>
+              ))}
+            </RSection>
+          )}
           <RSection title="Invoice parties">
             <div className="rkv-grid">
               <KV label="Lessor (on invoice)">{l.lessorName || asset?.landlordName || '—'}</KV>

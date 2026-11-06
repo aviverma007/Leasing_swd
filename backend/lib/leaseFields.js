@@ -88,6 +88,9 @@ const LEASE_FIELDS = [
   ['rsSlabsJson', 'RsSlabsJson', 'str', 1000],    // [{"upto":1000000,"pct":8},{"upto":null,"pct":10}]
   ['rentStartDate', 'RentStartDate', 'date'],     // rent-free override; else ActualRcd → DocRentCommencement → StartDate
   ['camStartDate', 'CamStartDate', 'date'],       // CAM billing start; else ActualHandover → rent start
+  // v4.2 — negotiation mode (MG under negotiation)
+  ['negotiationMode', 'NegotiationMode', 'str', 20],  // '' | 'InterimRate' | 'RsOnly' | 'HoldMg'
+  ['negotiatedMg', 'NegotiatedMg', 'dec'],            // interim MG (same basis as MgBasis) while negotiating
   // Invoice party details — per-lease lessor/lessee overrides (SPV-wise invoicing)
   ['lessorName', 'LessorName', 'str', 200],
   ['lessorAddress', 'LessorAddress', 'str', 500],

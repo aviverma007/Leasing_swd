@@ -29,14 +29,14 @@ const ENTITIES = {
   },
   units: {
     table: 'Units', prefix: 'UNT',
-    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status', 'Owner', 'UnitType', 'Plc', 'CoveredArea', 'CustomerId'],
-    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status, owner: r.Owner, unitType: r.UnitType, plc: r.Plc, coveredArea: r.CoveredArea, customerId: r.CustomerId })
+    cols: ['Name', 'AssetId', 'BlockId', 'Floor', 'CarpetArea', 'BuiltupArea', 'Status', 'Owner', 'UnitType', 'Plc', 'CoveredArea', 'CustomerId', 'CardRate'],
+    map: r => ({ id: r.Id, code: r.Code, name: r.Name, assetId: r.AssetId, blockId: r.BlockId, floor: r.Floor, carpetArea: r.CarpetArea, builtupArea: r.BuiltupArea, status: r.Status, owner: r.Owner, unitType: r.UnitType, plc: r.Plc, coveredArea: r.CoveredArea, customerId: r.CustomerId, cardRate: r.CardRate == null ? null : Number(r.CardRate) })
   },
   brands: {
     table: 'Brands', prefix: 'BRD',
-    cols: ['Name', 'CompanyId', 'Category', 'RegularAddress', 'Address', 'PanNo', 'Gstin', ...BRAND_FIELDS.map(f => f[1])],
+    cols: ['Name', 'CompanyId', 'Category', 'RegularAddress', 'Address', 'PanNo', 'Gstin', 'Email', ...BRAND_FIELDS.map(f => f[1])],
     map: r => {
-      const o = { id: r.Id, code: r.Code, name: r.Name, companyId: r.CompanyId, category: r.Category, regularAddress: r.RegularAddress, address: r.Address, panNo: r.PanNo, gstin: r.Gstin };
+      const o = { id: r.Id, code: r.Code, name: r.Name, companyId: r.CompanyId, category: r.Category, regularAddress: r.RegularAddress, address: r.Address, panNo: r.PanNo, gstin: r.Gstin, email: r.Email };
       for (const [key, col, type] of BRAND_FIELDS) {
         let v = r[col];
         if (v === undefined || v === null) { o[key] = null; continue; }
@@ -74,7 +74,7 @@ const ENTITIES = {
 
 // Columns that must be bound as numbers (SQL Server rejects strings for these)
 const INT_COLS = new Set(['TotalFloors', 'Floor', ...BRAND_FIELDS.filter(f => f[2] === 'int').map(f => f[1])]);
-const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea', 'CoveredArea', ...BRAND_FIELDS.filter(f => f[2] === 'dec').map(f => f[1])]);
+const DEC_COLS = new Set(['CarpetArea', 'BuiltupArea', 'CoveredArea', 'CardRate', ...BRAND_FIELDS.filter(f => f[2] === 'dec').map(f => f[1])]);
 const DATE_COLS = new Set(BRAND_FIELDS.filter(f => f[2] === 'date').map(f => f[1]));
 // DB column -> body key for the extended brand fields
 const BRAND_KEYMAP = Object.fromEntries(BRAND_FIELDS.map(f => [f[1], f[0]]));
@@ -134,7 +134,7 @@ function router(entityKey) {
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
         PanNo: 'panNo', Gstin: 'gstin', UnitType: 'unitType', Plc: 'plc', CoveredArea: 'coveredArea', ReraNo: 'reraNo', OcStatus: 'ocStatus',
-        CustomerId: 'customerId', CustType: 'custType', Phone: 'phone', Firm: 'firm', Nri: 'nri', Remarks: 'remarks',
+        CustomerId: 'customerId', CardRate: 'cardRate', CustType: 'custType', Phone: 'phone', Firm: 'firm', Nri: 'nri', Remarks: 'remarks',
         LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
         BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',
@@ -179,7 +179,7 @@ function router(entityKey) {
         Floor: 'floor', CarpetArea: 'carpetArea', BuiltupArea: 'builtupArea', Status: 'status', Owner: 'owner',
         CompanyId: 'companyId', Category: 'category', RegularAddress: 'regularAddress', Address: 'address',
         PanNo: 'panNo', Gstin: 'gstin', UnitType: 'unitType', Plc: 'plc', CoveredArea: 'coveredArea', ReraNo: 'reraNo', OcStatus: 'ocStatus',
-        CustomerId: 'customerId', CustType: 'custType', Phone: 'phone', Firm: 'firm', Nri: 'nri', Remarks: 'remarks',
+        CustomerId: 'customerId', CardRate: 'cardRate', CustType: 'custType', Phone: 'phone', Firm: 'firm', Nri: 'nri', Remarks: 'remarks',
         LandlordName: 'landlordName', LandlordAddress: 'landlordAddress',
         BankName: 'bankName', BankBranch: 'bankBranch', BankAcc: 'bankAcc', BankIfsc: 'bankIfsc', BankMicr: 'bankMicr',
         Email: 'email', Password: 'password', Role: 'role', Active: 'active',

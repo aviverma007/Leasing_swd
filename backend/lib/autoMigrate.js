@@ -47,6 +47,9 @@ const BASE_COLUMNS = [
   ['Units', 'UnitType', 'NVARCHAR(30) NULL'],
   ['Units', 'Plc', 'NVARCHAR(80) NULL'],
   ['Units', 'CoveredArea', 'DECIMAL(18,2) NULL'],
+  // v4.2 — per-unit card rate (pre-fills the lease MG) + tenant email for dunning
+  ['Units', 'CardRate', 'DECIMAL(18,2) NULL'],
+  ['Brands', 'Email', 'NVARCHAR(200) NULL'],
   // ── v3: separated masters & lifecycle ──
   ['Units', 'CustomerId', 'VARCHAR(40) NULL'],
   ['Leases', 'RenewedToId', 'VARCHAR(40) NULL'],
@@ -126,6 +129,20 @@ const TABLES = [
       Remarks NVARCHAR(500) NULL,
       CreatedBy NVARCHAR(150) NULL,
       CreatedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
+  ['LeaseUnits', `CREATE TABLE {S}.LeaseUnits(
+      Id VARCHAR(40) PRIMARY KEY,
+      LeaseId VARCHAR(40) NOT NULL,
+      UnitId VARCHAR(40) NOT NULL,
+      RatePsf DECIMAL(18,2) NULL)`],
+  ['DunningLog', `CREATE TABLE {S}.DunningLog(
+      Id VARCHAR(40) PRIMARY KEY,
+      InvoiceId VARCHAR(40) NOT NULL,
+      Stage INT NOT NULL,
+      Channel VARCHAR(20) NOT NULL DEFAULT 'in-app',
+      ToEmail NVARCHAR(200) NULL,
+      Note NVARCHAR(400) NULL,
+      SentBy NVARCHAR(150) NULL,
+      SentAt DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
   ['Comments', `CREATE TABLE {S}.Comments(
       Id VARCHAR(40) PRIMARY KEY,
       EntityType VARCHAR(30) NOT NULL,

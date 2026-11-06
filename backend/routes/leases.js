@@ -17,6 +17,38 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* v4.2 — multi-unit leases: additional units with their own ₹/sqft rate */
+async function syncExtraUnits(pool, leaseId, primaryUnitId, extraUnits) {
+  if (!Array.isArray(extraUnits)) return; // key absent → leave as-is
+  const old = await pool.request().input('l', sql.VarChar(40), leaseId)
+    .query(`SELECT UnitId FROM ${SCHEMA}.LeaseUnits WHERE LeaseId=@l`);
+  const oldIds = new Set(old.recordset.map(r => r.UnitId));
+  const next = extraUnits
+    .map(x => ({ unitId: String(x.unitId || ''), ratePsf: Number(x.ratePsf) || 0 }))
+    .filter(x => x.unitId && x.unitId !== primaryUnitId);
+  const nextIds = new Set(next.map(x => x.unitId));
+  await pool.request().input('l', sql.VarChar(40), leaseId).query(`DELETE FROM ${SCHEMA}.LeaseUnits WHERE LeaseId=@l`);
+  for (const x of next) {
+    await pool.request().input('id', sql.VarChar(40), uid()).input('l', sql.VarChar(40), leaseId)
+      .input('u', sql.VarChar(40), x.unitId).input('r', sql.Decimal(18, 2), x.ratePsf)
+      .query(`INSERT INTO ${SCHEMA}.LeaseUnits (Id,LeaseId,UnitId,RatePsf) VALUES (@id,@l,@u,@r)`);
+    await pool.request().input('u', sql.VarChar(40), x.unitId).query(`UPDATE ${SCHEMA}.Units SET Status='Leased' WHERE Id=@u`);
+  }
+  for (const freed of [...oldIds].filter(id => !nextIds.has(id))) {
+    await pool.request().input('u', sql.VarChar(40), freed).query(`UPDATE ${SCHEMA}.Units SET Status='Vacant' WHERE Id=@u`);
+  }
+}
+
+router.get('/:id/units', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('l', sql.VarChar(40), req.params.id).query(`
+      SELECT lu.UnitId, lu.RatePsf, u.Name, u.BuiltupArea FROM ${SCHEMA}.LeaseUnits lu
+      JOIN ${SCHEMA}.Units u ON u.Id=lu.UnitId WHERE lu.LeaseId=@l`);
+    res.json(r.recordset.map(x => ({ unitId: x.UnitId, ratePsf: Number(x.RatePsf) || 0, name: x.Name, builtupArea: Number(x.BuiltupArea) || 0 })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 function mapLease(r) {
   return {
     id: r.Id, code: r.Code, brandId: r.BrandId, unitId: r.UnitId, assetId: r.AssetId,
@@ -83,6 +115,7 @@ router.post('/', async (req, res) => {
     await request.query(`INSERT INTO ${SCHEMA}.Leases (${colList}) VALUES (${valList})`);
 
     await pool.request().input('id', sql.VarChar(40), b.unitId).query(`UPDATE ${SCHEMA}.Units SET Status='Leased' WHERE Id=@id`);
+    await syncExtraUnits(pool, id, b.unitId, b.extraUnits);
     await logAudit(pool, 'leases', id, 'created', `Lease ${code} created — pending approval`, userName(req));
 
     const row = await pool.request().input('id', sql.VarChar(40), id).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
@@ -131,6 +164,7 @@ router.put('/:id', async (req, res) => {
       ...LEASE_FIELDS.filter(f => Object.prototype.hasOwnProperty.call(b, f[0])).map(f => f[1])];
     const diff = diffRows(oldRow, row.recordset[0], watchCols);
     if (diff) await logAudit(pool, 'leases', req.params.id, 'edited', diff, userName(req));
+    await syncExtraUnits(pool, req.params.id, row.recordset[0].UnitId, b.extraUnits);
     res.json(mapLease(row.recordset[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -255,6 +289,10 @@ router.post('/:id/exit', async (req, res) => {
       .query(`UPDATE ${SCHEMA}.Leases SET LifecycleStage='Exited', Status='Closed', OnHold=0, ExitDate=@xd WHERE Id=@id`);
     await pool.request().input('u', sql.VarChar(40), lease.UnitId)
       .query(`UPDATE ${SCHEMA}.Units SET Status='Vacant' WHERE Id=@u`);
+    // free any additional units on a multi-unit lease
+    await pool.request().input('l', sql.VarChar(40), req.params.id).query(`
+      UPDATE u SET u.Status='Vacant' FROM ${SCHEMA}.Units u
+      JOIN ${SCHEMA}.LeaseUnits lu ON lu.UnitId=u.Id WHERE lu.LeaseId=@l`);
     await pool.request()
       .input('lid', sql.VarChar(40), uid()).input('l', sql.VarChar(40), req.params.id)
       .input('f', sql.VarChar(30), lease.LifecycleStage || 'Active').input('t', sql.VarChar(30), 'Exited')
@@ -325,6 +363,11 @@ router.post('/:id/renew', async (req, res) => {
       .input('f', sql.VarChar(30), old.LifecycleStage || 'Active').input('t', sql.VarChar(30), 'Renewed')
       .input('by', sql.NVarChar(150), by).input('rm', sql.NVarChar(400), `Renewed as ${newCode} from ${startDate} at MG ${newMg}`)
       .query(`INSERT INTO ${SCHEMA}.LeaseStageLog (Id,LeaseId,FromStage,ToStage,ChangedBy,Remarks) VALUES (@lid,@l,@f,@t,@by,@rm)`);
+    // carry additional units (and their rates) into the renewed lease
+    await pool.request().input('nl', sql.VarChar(40), newId).input('ol', sql.VarChar(40), req.params.id).query(`
+      INSERT INTO ${SCHEMA}.LeaseUnits (Id, LeaseId, UnitId, RatePsf)
+      SELECT LOWER(REPLACE(CONVERT(VARCHAR(36), NEWID()),'-','')), @nl, UnitId, RatePsf
+      FROM ${SCHEMA}.LeaseUnits WHERE LeaseId=@ol`);
     await logAudit(pool, 'leases', req.params.id, 'renewed', `Renewed as ${newCode} from ${startDate} at MG ${newMg}`, by);
     await logAudit(pool, 'leases', newId, 'created', `Created by renewal of ${old.Code} — new term ${startDate} to ${endDate}, MG ${newMg}`, by);
     res.json({ id: newId, code: newCode, startDate, endDate, mg: newMg });

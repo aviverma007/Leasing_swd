@@ -353,6 +353,7 @@ function ViewRouter(props) {
   if (view === 'agreementrecon') return <AgreementReconPage {...props} />;
   if (view === 'sdrecon') return <SdReconPage {...props} />;
   if (view === 'camtrueup') return <CamTrueupPage {...props} />;
+  if (view === 'dunning') return <DunningPage {...props} />;
   return null;
 }
 
@@ -1401,7 +1402,7 @@ const NFA_ROWS = [
   ['nfaApprovedBy1', 'Approved by', 'text'],
   ['nfaApprovedBy2', 'Approved by (2)', 'text']
 ];
-const ALL_LEASE_KEYS = [...new Set([...LEASE_SECTIONS.flatMap(([, fs]) => fs.map(f => f[0])), ...NFA_ROWS.filter(r => r[0] !== 'section').map(r => r[0]), 'escMode', 'escEveryYears', 'rsSlabsJson'])];
+const ALL_LEASE_KEYS = [...new Set([...LEASE_SECTIONS.flatMap(([, fs]) => fs.map(f => f[0])), ...NFA_ROWS.filter(r => r[0] !== 'section').map(r => r[0]), 'escMode', 'escEveryYears', 'rsSlabsJson', 'negotiationMode', 'negotiatedMg'])];
 
 /* Slab editor for variable revenue share — stores [{upto,pct}] JSON on the lease */
 function RsSlabEditor({ value, onChange }) {
@@ -1446,9 +1447,26 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
     for (const k of ALL_LEASE_KEYS) base[k] = existing && existing[k] != null ? existing[k] : '';
     if (base.igstApplicable === 1 || base.igstApplicable === true) base.igstApplicable = 'Yes';
     else if (base.igstApplicable === 0 || base.igstApplicable === false) base.igstApplicable = '';
+    base.extraUnits = [];
     return base;
   });
   const set = (k, v) => setForm((s) => ({ ...s, [k]: v }));
+  // multi-unit lease: load the additional units when editing
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try { const xs = await api.leases.units(id); set('extraUnits', xs.map((x) => ({ unitId: x.unitId, ratePsf: x.ratePsf }))); }
+      catch (_) { /* table may not exist yet */ }
+    })();
+  }, [id]); // eslint-disable-line
+  // card rate: pre-fill MG when picking a unit on a NEW lease
+  const onUnitPick = (unitId) => {
+    set('unitId', unitId);
+    if (!id) {
+      const u = findById(db.units, unitId);
+      if (u && Number(u.cardRate) > 0) setForm((s) => ({ ...s, unitId, mg: Number(u.cardRate), mgBasis: 'PerSqFt' }));
+    }
+  };
 
   if (!id && !vacantUnits.length) { notify('No vacant units. Create a unit first.', true); onClose(); return null; }
   if (!db.brands.length) { notify('Create a brand first.', true); onClose(); return null; }
@@ -1521,10 +1539,30 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
                 </select>
               </div>
               <div className="field"><label>Unit <span className="req">*</span></label>
-                <select value={form.unitId} disabled={!!id} onChange={(e) => set('unitId', e.target.value)}>
-                  {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}</option>)}
+                <select value={form.unitId} disabled={!!id} onChange={(e) => onUnitPick(e.target.value)}>
+                  {vacantUnits.map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}{Number(u.cardRate) > 0 ? ` · card ₹${u.cardRate}/sqft` : ''}</option>)}
                 </select>
               </div>
+            </div>
+            <div className="slab-editor">
+              <div className="sectlabel">Additional units on this lease (optional — each billed at its own ₹/sq ft rate)</div>
+              {(form.extraUnits || []).map((x, i) => (
+                <div className="grp3" key={i}>
+                  <div className="field"><label>Unit</label>
+                    <select value={x.unitId} onChange={(e) => set('extraUnits', form.extraUnits.map((r, idx) => idx === i ? { ...r, unitId: e.target.value } : r))}>
+                      <option value="">— select unit —</option>
+                      {db.units.filter((u) => u.id !== form.unitId && (u.status !== 'Leased' || x.unitId === u.id)).map((u) => <option key={u.id} value={u.id}>{u.name} · {nameOf(db.assets, u.assetId)}</option>)}
+                    </select>
+                  </div>
+                  <div className="field"><label>Rate (₹/sq ft/month)</label>
+                    <input type="number" step="0.01" value={x.ratePsf ?? ''} onChange={(e) => set('extraUnits', form.extraUnits.map((r, idx) => idx === i ? { ...r, ratePsf: e.target.value === '' ? '' : +e.target.value } : r))} /></div>
+                  <div className="field" style={{ alignSelf: 'end' }}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => set('extraUnits', form.extraUnits.filter((_, idx) => idx !== i))}>Remove</button>
+                  </div>
+                </div>
+              ))}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => set('extraUnits', [...(form.extraUnits || []), { unitId: '', ratePsf: '' }])}>+ Add unit</button>
+              {(form.extraUnits || []).length > 0 && <div className="sub" style={{ marginTop: 6 }}>Each unit gets its own MG / CAM / Utility invoice lines (escalation and rent-free rules apply to all). The main unit above uses the MG set in Commercial Terms.</div>}
             </div>
             {(ownerCustomer || (unit && unit.owner)) && (
               <Callout>Unit owner (Customer master): <b>{ownerCustomer ? `${ownerCustomer.name} · ${ownerCustomer.code}` : unit.owner}</b>
@@ -1581,6 +1619,24 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
             {['PureRS', 'MGvsRS', 'VarRS'].includes(form.rentalType) && (
               <RsSlabEditor value={form.rsSlabsJson} onChange={(v) => set('rsSlabsJson', v)} />
             )}
+            <div className="slab-editor">
+              <div className="sectlabel">MG under negotiation? (optional)</div>
+              <div className="grp2">
+                <div className="field"><label>Negotiation mode</label>
+                  <select value={form.negotiationMode || ''} onChange={(e) => set('negotiationMode', e.target.value)}>
+                    <option value="">— none (bill normal MG) —</option>
+                    <option value="InterimRate">Bill a negotiated interim rate (true-up later)</option>
+                    <option value="RsOnly">Bill revenue share only until MG is agreed</option>
+                    <option value="HoldMg">Hold MG billing (CAM/utility continue)</option>
+                  </select>
+                </div>
+                {form.negotiationMode === 'InterimRate' && (
+                  <div className="field"><label>Interim MG ({form.mgBasis === 'PerSqFt' ? '₹/sq ft' : '₹ lumpsum'})</label>
+                    <input type="number" step="0.01" value={form.negotiatedMg ?? ''} onChange={(e) => set('negotiatedMg', e.target.value === '' ? '' : +e.target.value)} /></div>
+                )}
+              </div>
+              {form.negotiationMode && <div className="sub">Interim invoices are marked “(negotiated interim)”. When the final MG is agreed, clear this mode, set the final MG above, and use <b>MG true-up</b> on the lease page to bill the differential.</div>}
+            </div>
             <div className="grp3">
               <div className="field"><label>CAM (₹/sq ft b-up)</label><input type="number" value={form.cam} onChange={(e) => set('cam', +e.target.value)} /></div>
               <div className="field"><label>Utility (₹/sq ft b-up)</label><input type="number" value={form.utility} onChange={(e) => set('utility', +e.target.value)} /></div>
@@ -3631,6 +3687,78 @@ function SdReconPage({ notify }) {
           )}
         </div>
       </div>
+    </>
+  );
+}
+
+/* ── Dunning: staged payment reminders on overdue invoices ── */
+function DunningPage({ db, setView, notify, actingRole }) {
+  const [data, setData] = React.useState(null);
+  const [busy, setBusy] = React.useState('');
+  const [mailPreview, setMailPreview] = React.useState(null);
+  const canSend = canEdit(actingRole, 'collections');
+  const load = async () => { try { setData(await api.dunning.list()); } catch (e) { notify(e.message, true); } };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const remind = async (r) => {
+    setBusy(r.invoiceId);
+    try {
+      const res = await api.dunning.remind(r.invoiceId);
+      setMailPreview(res);
+      notify(res.channel === 'email'
+        ? `Stage-${res.stage} reminder e-mailed to ${res.toEmail}.`
+        : `Stage-${res.stage} reminder recorded — no SMTP/e-mail, copy the text to send manually.`);
+      await load();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+  const stagePill = (st) => st >= 4 ? <Pill color="red">4 · FINAL NOTICE</Pill>
+    : st === 3 ? <Pill color="red">3 · Firm</Pill>
+    : st === 2 ? <Pill color="amber">2 · Second</Pill>
+    : st === 1 ? <Pill color="blue">1 · Gentle</Pill> : <Pill color="grey">—</Pill>;
+
+  if (!data) return <div className="empty"><p>Loading overdue invoices…</p></div>;
+  return (
+    <>
+      <Callout>Reminder ladder: <b>Stage 1</b> at 1–7 days overdue · <b>Stage 2</b> at 8–15 · <b>Stage 3</b> at 16–30 · <b>Stage 4 (final notice)</b> beyond 30.
+        The scheduler records each stage automatically once a day{data.mailerEnabled ? ' and e-mails the brand’s billing address.' : '. E-mail is OFF (no SMTP configured) — reminders are logged here and the text can be copied to send manually.'}
+        {' '}Set the brand’s <b>billing email</b> in Brand Master for automatic sending.</Callout>
+      <div className="tablewrap" style={{ marginTop: 14 }}>
+        {data.rows.length === 0 ? <EmptyMini text="🎉 Nothing overdue — no reminders needed." /> : (
+          <table>
+            <thead><tr><th>Invoice</th><th>Brand / Unit</th><th>Due date</th><th className="num">Balance</th><th className="num">Days overdue</th><th>Stage</th><th>Reminders</th><th></th></tr></thead>
+            <tbody>
+              {data.rows.map((r) => (
+                <tr key={r.invoiceId} className="rowlink" onClick={() => setView('invoices', r.invoiceId)}>
+                  <td><span className="code">{r.no}</span><div className="sub">{r.type} · {ymLabel(r.ym)}</div></td>
+                  <td>{r.brandName}<div className="sub">{r.unitName}{r.brandEmail ? ' · ' + r.brandEmail : ' · no email set'}</div></td>
+                  <td className="sub">{fmtDate(r.dueDate)}</td>
+                  <td className="num strong">{money0(r.balance)}</td>
+                  <td className="num" style={{ color: r.daysOverdue > 30 ? 'var(--red)' : 'var(--amber)' }}>{r.daysOverdue}</td>
+                  <td>{stagePill(r.stage)}</td>
+                  <td className="sub">{r.remindersSent ? `${r.remindersSent} sent · last ${new Date(r.lastReminderAt).toLocaleDateString('en-GB')}` : 'none yet'}</td>
+                  <td className="rowact" onClick={(e) => e.stopPropagation()}>
+                    {canSend && <button className="btn btn-teal btn-sm" disabled={busy === r.invoiceId} onClick={() => remind(r)}>
+                      {busy === r.invoiceId ? 'Sending…' : data.mailerEnabled && r.brandEmail ? '✉ Send reminder' : 'Record + get text'}
+                    </button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {mailPreview && (
+        <Modal title={`Reminder — ${mailPreview.stageLabel} (stage ${mailPreview.stage})`} onClose={() => setMailPreview(null)}
+          footer={<>
+            <button className="btn btn-ghost" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(`Subject: ${mailPreview.subject}\n\n${mailPreview.body}`).then(() => notify('Copied to clipboard.')); }}>Copy text</button>
+            <button className="btn btn-teal" onClick={() => setMailPreview(null)}>Done</button>
+          </>}>
+          {mailPreview.channel !== 'email' && <Callout warn>E-mail was not sent ({mailPreview.toEmail ? 'SMTP not configured' : 'brand has no billing email'}) — the reminder is logged; copy this text and send it from Outlook.</Callout>}
+          <div className="field"><label>Subject</label><input readOnly value={mailPreview.subject} /></div>
+          <div className="field"><label>Body</label><textarea readOnly style={{ minHeight: 220, fontFamily: 'var(--mono)', fontSize: 12 }} value={mailPreview.body} /></div>
+        </Modal>
+      )}
     </>
   );
 }

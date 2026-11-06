@@ -64,7 +64,8 @@ export const api = {
     settlement: (id) => req('GET', `/leases/${id}/settlement`),
     stageLog: (id) => req('GET', `/leases/${id}/stage-log`),
     setAlerts: (id, enabled) => req('POST', `/leases/${id}/alerts`, { enabled }),
-    release: (id) => req('POST', `/leases/${id}/release`)
+    release: (id) => req('POST', `/leases/${id}/release`),
+    units: (id) => req('GET', `/leases/${id}/units`)
   },
   sales: crud('/sales'),
   invoices: {
@@ -121,7 +122,13 @@ export const api = {
     agreementRecon: () => req('GET', '/reports/agreement-recon'),
     sdRecon: () => req('GET', '/reports/sd-recon'),
     alerts: () => req('GET', '/reports/alerts'),
-    camTrueup: (year, rate) => req('GET', `/reports/cam-trueup?year=${year}&rate=${rate}`)
+    camTrueup: (year, rate) => req('GET', `/reports/cam-trueup?year=${year}&rate=${rate}`),
+    mgTrueup: (leaseId) => req('GET', `/reports/mg-trueup?leaseId=${leaseId}`)
+  },
+  dunning: {
+    list: () => req('GET', '/dunning'),
+    log: (invoiceId) => req('GET', `/dunning/${invoiceId}/log`),
+    remind: (invoiceId) => req('POST', `/dunning/${invoiceId}/remind`)
   },
   deletionRequests: {
     list: (status) => req('GET', '/deletion-requests' + (status ? `?status=${status}` : '')),

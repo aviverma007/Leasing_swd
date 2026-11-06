@@ -13,7 +13,9 @@ function mgAmount(lease, unit, ym) {
 function escFactor(lease, ym) {
   const esc = Number(lease.Esc) || 0;
   if (esc <= 0 || !ym || !lease.StartDate) return 1;
-  const start = new Date(lease.StartDate);
+  // v4.2: anniversaries are counted from RENT COMMENCEMENT (RCD), as Indian deeds
+  // specify ("escalation after N years from RCD") — falls back to lease start.
+  const start = rentStartOf(lease) || new Date(lease.StartDate);
   const billMonth = new Date(ym + '-01T00:00:00Z');
   let years = billMonth.getUTCFullYear() - start.getUTCFullYear();
   const annivThisYear = new Date(Date.UTC(billMonth.getUTCFullYear(), start.getUTCMonth(), 1));
@@ -90,13 +92,15 @@ async function getUnit(pool, unitId) {
   return row.recordset[0];
 }
 
-async function invoiceExists(pool, leaseId, ym, type) {
-  const r = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym).input('t', sql.VarChar(20), type)
-    .query(`SELECT COUNT(*) cnt FROM ${SCHEMA}.Invoices WHERE LeaseId=@l AND Ym=@y AND Type=@t`);
+async function invoiceExists(pool, leaseId, ym, type, unitId) {
+  const req = pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym).input('t', sql.VarChar(20), type);
+  let where = `LeaseId=@l AND Ym=@y AND Type=@t`;
+  if (unitId) { req.input('u', sql.VarChar(40), unitId); where += ' AND UnitId=@u'; }
+  const r = await req.query(`SELECT COUNT(*) cnt FROM ${SCHEMA}.Invoices WHERE ${where}`);
   return r.recordset[0].cnt > 0;
 }
 
-async function pushInvoice(pool, lease, type, desc, amount, ym, due, by) {
+async function pushInvoice(pool, lease, type, desc, amount, ym, due, by, unitIdOverride) {
   if (amount <= 0) return 0;
   const gstPct = Number(lease.Gst) || 0;
   const igst = lease.IgstApplicable === true || lease.IgstApplicable === 1;
@@ -108,7 +112,7 @@ async function pushInvoice(pool, lease, type, desc, amount, ym, due, by) {
   const paymentTermsDays = lease.PaymentTermsDays || 7;
   await pool.request()
     .input('id', sql.VarChar(40), id).input('no', sql.VarChar(20), no).input('type', sql.VarChar(20), type)
-    .input('leaseId', sql.VarChar(40), lease.Id).input('brandId', sql.VarChar(40), lease.BrandId).input('unitId', sql.VarChar(40), lease.UnitId)
+    .input('leaseId', sql.VarChar(40), lease.Id).input('brandId', sql.VarChar(40), lease.BrandId).input('unitId', sql.VarChar(40), unitIdOverride || lease.UnitId)
     .input('ym', sql.Char(7), ym).input('desc', sql.NVarChar(300), desc).input('amount', sql.Decimal(18, 2), round2(amount))
     .input('gstPct', sql.Decimal(9, 3), gstPct).input('gstAmt', sql.Decimal(18, 2), gstAmt)
     .input('cgstAmt', sql.Decimal(18, 2), cgstAmt).input('sgstAmt', sql.Decimal(18, 2), sgstAmt).input('igstAmt', sql.Decimal(18, 2), igstAmt)
@@ -138,14 +142,54 @@ async function genLeaseInvoices(pool, leaseId, ym, by) {
   const rentFrac = monthFraction(ym, rentStartOf(lease));
   const camFrac = monthFraction(ym, camStartOf(lease));
   const tag = (frac) => frac < 1 && frac > 0 ? ' (pro-rata)' : '';
-  if (rentFrac > 0 && ['MG', 'MGvsRS'].includes(lease.RentalType) && !(await invoiceExists(pool, leaseId, ym, 'MG'))) {
-    made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}${tag(rentFrac)}`, round2(mgAmount(lease, unit, ym) * rentFrac), ym, due, by);
+  // v4.2 — negotiation mode: HoldMg/RsOnly skip MG; InterimRate bills the negotiated figure
+  const negMode = lease.NegotiationMode || '';
+  const mgAllowed = negMode !== 'HoldMg' && negMode !== 'RsOnly';
+  // extra units on this lease (multi-unit lease, per-unit rate)
+  const xr = await pool.request().input('l', sql.VarChar(40), leaseId)
+    .query(`SELECT lu.UnitId, lu.RatePsf, u.Name AS UnitName, u.BuiltupArea
+            FROM ${SCHEMA}.LeaseUnits lu JOIN ${SCHEMA}.Units u ON u.Id=lu.UnitId WHERE lu.LeaseId=@l`)
+    .catch(() => ({ recordset: [] }));
+  const extraUnits = xr.recordset;
+
+  if (rentFrac > 0 && mgAllowed && ['MG', 'MGvsRS'].includes(lease.RentalType)) {
+    // primary unit MG
+    if (!(await invoiceExists(pool, leaseId, ym, 'MG', lease.UnitId))) {
+      let base, negTag = '';
+      if (negMode === 'InterimRate' && Number(lease.NegotiatedMg) > 0) {
+        base = lease.MgBasis === 'PerSqFt' ? Number(lease.NegotiatedMg) * Number(unit.BuiltupArea || 0) : Number(lease.NegotiatedMg);
+        negTag = ' (negotiated interim)';
+      } else {
+        base = mgAmount(lease, unit, ym);
+      }
+      made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}${negTag}${tag(rentFrac)}`, round2(base * rentFrac), ym, due, by);
+    }
+    // extra units — each billed at ITS OWN rate (escalated), own invoice line
+    for (const xu of extraUnits) {
+      if (await invoiceExists(pool, leaseId, ym, 'MG', xu.UnitId)) continue;
+      const rate = Number(xu.RatePsf) || 0;
+      if (rate <= 0) continue;
+      const amt = rate * Number(xu.BuiltupArea || 0) * escFactor(lease, ym) * rentFrac;
+      made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${xu.UnitName} — ${ym}${tag(rentFrac)}`, round2(amt), ym, due, by, xu.UnitId);
+    }
   }
-  if (camFrac > 0 && Number(lease.Cam) > 0 && !(await invoiceExists(pool, leaseId, ym, 'CAM'))) {
-    made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${ym}${tag(camFrac)}`, round2(Number(lease.Cam) * Number(unit.BuiltupArea) * camFrac), ym, due, by);
+  if (camFrac > 0 && Number(lease.Cam) > 0) {
+    if (!(await invoiceExists(pool, leaseId, ym, 'CAM', lease.UnitId))) {
+      made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${ym}${tag(camFrac)}`, round2(Number(lease.Cam) * Number(unit.BuiltupArea) * camFrac), ym, due, by);
+    }
+    for (const xu of extraUnits) {
+      if (await invoiceExists(pool, leaseId, ym, 'CAM', xu.UnitId)) continue;
+      made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${xu.UnitName} — ${ym}${tag(camFrac)}`, round2(Number(lease.Cam) * Number(xu.BuiltupArea || 0) * camFrac), ym, due, by, xu.UnitId);
+    }
   }
-  if (camFrac > 0 && Number(lease.Utility) > 0 && !(await invoiceExists(pool, leaseId, ym, 'Utility'))) {
-    made += await pushInvoice(pool, lease, 'Utility', `Utility charges — ${ym}${tag(camFrac)}`, round2(Number(lease.Utility) * Number(unit.BuiltupArea) * camFrac), ym, due, by);
+  if (camFrac > 0 && Number(lease.Utility) > 0) {
+    if (!(await invoiceExists(pool, leaseId, ym, 'Utility', lease.UnitId))) {
+      made += await pushInvoice(pool, lease, 'Utility', `Utility charges — ${ym}${tag(camFrac)}`, round2(Number(lease.Utility) * Number(unit.BuiltupArea) * camFrac), ym, due, by);
+    }
+    for (const xu of extraUnits) {
+      if (await invoiceExists(pool, leaseId, ym, 'Utility', xu.UnitId)) continue;
+      made += await pushInvoice(pool, lease, 'Utility', `Utility charges — ${xu.UnitName} — ${ym}${tag(camFrac)}`, round2(Number(lease.Utility) * Number(xu.BuiltupArea || 0) * camFrac), ym, due, by, xu.UnitId);
+    }
   }
   if (rentFrac > 0) await syncRevShare(pool, leaseId, ym, by);
   return made;
@@ -153,7 +197,9 @@ async function genLeaseInvoices(pool, leaseId, ym, by) {
 
 async function syncRevShare(pool, leaseId, ym, by) {
   const lease = await getLease(pool, leaseId);
-  if (!lease || !['PureRS', 'MGvsRS', 'VarRS'].includes(lease.RentalType)) return;
+  // RsOnly negotiation mode bills revenue share regardless of the rental type
+  const rsOnly = lease && lease.NegotiationMode === 'RsOnly';
+  if (!lease || (!rsOnly && !['PureRS', 'MGvsRS', 'VarRS'].includes(lease.RentalType))) return;
   const unit = await getUnit(pool, lease.UnitId);
   const saleRow = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym)
     .query(`SELECT TOP 1 * FROM ${SCHEMA}.Sales WHERE LeaseId=@l AND Ym=@y`);
@@ -161,7 +207,7 @@ async function syncRevShare(pool, leaseId, ym, by) {
   const pct = rsPctFor(lease, sales); // slab-aware; falls back to flat RevSharePct
   const rs = sales * pct / 100;
   let billable = rs;
-  if (lease.RentalType === 'MGvsRS') billable = Math.max(0, rs - mgAmount(lease, unit, ym));
+  if (!rsOnly && lease.RentalType === 'MGvsRS') billable = Math.max(0, rs - mgAmount(lease, unit, ym));
   const existingRow = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym)
     .query(`SELECT * FROM ${SCHEMA}.Invoices WHERE LeaseId=@l AND Ym=@y AND Type='RevShare'`);
   const existing = existingRow.recordset[0];

@@ -82,6 +82,7 @@ export const MASTER_SCHEMA = {
       { k: 'carpetArea', l: 'Carpet area (sq ft)', type: 'number', ph: '2200' },
       { k: 'coveredArea', l: 'Covered area (sq ft)', type: 'number', ph: '2400' },
       { k: 'builtupArea', l: 'Super/Built-up area (sq ft)', type: 'number', ph: '2600' },
+      { k: 'cardRate', l: 'Card rate (₹/sq ft/month — pre-fills new leases)', type: 'number', ph: '120' },
       { k: 'customerId', l: 'Owner (from Customer master)', ref: 'customers' },
       { k: 'owner', l: 'Owner name (legacy text — prefer the dropdown)', ph: 'Unit owner name' }
     ],
@@ -93,6 +94,7 @@ export const MASTER_SCHEMA = {
     fields: [
       { k: 'name', l: 'Brand name', req: 1, ph: 'Brewhouse Cafe' },
       { k: 'companyId', l: 'Company', req: 1, ref: 'companies' },
+      { k: 'email', l: 'Billing email (payment reminders go here)', ph: 'accounts@brand.com' },
       { k: 'panNo', l: 'Brand PAN', ph: 'AABCB1234L' },
       { k: 'gstin', l: 'Brand GSTIN', ph: '06AABCB1234L1ZX' },
       { k: 'category', l: 'Brand category', type: 'select', opts: CATEGORIES },
@@ -205,6 +207,7 @@ export const NAV = [
   { v: 'sales', label: 'Sales (Rev share)' },
   { v: 'invoices', label: 'Invoices' },
   { v: 'collections', label: 'Collections' },
+  { v: 'dunning', label: 'Dunning (Reminders)' },
   { v: 'approvals', label: 'Approvals' },
   { v: 'collectionmaster', label: 'Collection Master' },
   { v: 'ledger', label: 'Tenant Ledger' },
@@ -242,6 +245,7 @@ export const PAGES = {
   invoices: { t: 'Invoices', s: 'MG / Rev-share / CAM / Utility & ad-hoc, with e-invoice IRN + QR' },
   collections: { t: 'Collections', s: 'Invoice-wise receipts with TDS and instrument' },
   approvals: { t: 'Approvals', s: 'Maker–checker inbox — documents pending your approval' },
+  dunning: { t: 'Dunning — Payment Reminders', s: 'Overdue invoices by reminder stage; send or record reminders tenant-wise' },
   ledger: { t: 'Tenant Ledger (SOA)', s: 'Per-tenant statement of account — invoices, credit notes, receipts, running balance' },
   collectionmaster: { t: 'Collection Master', s: 'Invoiced, collected and outstanding — reconciled per brand & unit' },
   investors: { t: 'Investor Units', s: "Investor ownership, disbursement % & bank details (maker-checker)" },

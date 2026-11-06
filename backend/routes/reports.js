@@ -283,4 +283,39 @@ router.get('/cam-trueup', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* MG true-up after a negotiation: compares what was billed in the interim
+   months against the lease's FINAL MG (current Mg field, escalated), so the
+   differential can be raised as one ad-hoc invoice when terms are agreed.
+   GET /api/reports/mg-trueup?leaseId=... */
+router.get('/mg-trueup', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const leaseId = String(req.query.leaseId || '');
+    if (!leaseId) return res.status(400).json({ error: 'leaseId is required' });
+    const lr = await pool.request().input('id', sql.VarChar(40), leaseId)
+      .query(`SELECT l.*, u.BuiltupArea, u.Name AS UnitName, b.Name AS BrandName
+              FROM ${SCHEMA}.Leases l JOIN ${SCHEMA}.Units u ON u.Id=l.UnitId
+              JOIN ${SCHEMA}.Brands b ON b.Id=l.BrandId WHERE l.Id=@id`);
+    const lease = lr.recordset[0];
+    if (!lease) return res.status(404).json({ error: 'Lease not found' });
+    const { mgAmount } = require('../lib/billing');
+    const inv = await pool.request().input('l', sql.VarChar(40), leaseId).query(`
+      SELECT Ym, SUM(Amount) AS Billed,
+        MAX(CASE WHEN Descr LIKE '%negotiated interim%' THEN 1 ELSE 0 END) AS WasInterim
+      FROM ${SCHEMA}.Invoices WHERE LeaseId=@l AND Type='MG' AND UnitId=@u
+      GROUP BY Ym ORDER BY Ym`.replace('@u', `'${lease.UnitId}'`));
+    const rows = inv.recordset.map(x => {
+      const billed = Math.round(Number(x.Billed) * 100) / 100;
+      const full = Math.round(mgAmount(lease, { BuiltupArea: lease.BuiltupArea }, x.Ym) * 100) / 100;
+      return { ym: x.Ym, billed, finalMg: full, wasInterim: !!x.WasInterim, diff: Math.round((full - billed) * 100) / 100 };
+    }).filter(r => r.wasInterim || Math.abs(r.diff) > 0.5);
+    const totalDiff = Math.round(rows.reduce((s, r) => s + (r.wasInterim ? r.diff : 0), 0) * 100) / 100;
+    res.json({
+      leaseId, leaseCode: lease.Code, brandName: lease.BrandName, unitName: lease.UnitName,
+      negotiationMode: lease.NegotiationMode || '', negotiatedMg: Number(lease.NegotiatedMg) || 0,
+      finalMgRate: Number(lease.Mg) || 0, rows, totalDiff
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
