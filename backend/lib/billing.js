@@ -6,7 +6,10 @@ function mgAmount(lease, unit, ym) {
   return round2(base * escFactor(lease, ym));
 }
 
-/* Escalation: Esc % applied on each completed lease anniversary before the billing month. */
+/* Escalation: Esc % applied per completed lease anniversary before the billing month.
+   EscMode 'Annual' (default): compounds every year.
+   EscMode 'Stepped': compounds once every EscEveryYears years (Indian standard:
+   e.g. 15% every 3 years → Esc=15, EscEveryYears=3). */
 function escFactor(lease, ym) {
   const esc = Number(lease.Esc) || 0;
   if (esc <= 0 || !ym || !lease.StartDate) return 1;
@@ -16,7 +19,55 @@ function escFactor(lease, ym) {
   const annivThisYear = new Date(Date.UTC(billMonth.getUTCFullYear(), start.getUTCMonth(), 1));
   if (billMonth < annivThisYear) years -= 1;
   if (years <= 0) return 1;
+  if ((lease.EscMode || 'Annual') === 'Stepped') {
+    const every = Math.max(1, parseInt(lease.EscEveryYears, 10) || 3);
+    const steps = Math.floor(years / every);
+    return steps <= 0 ? 1 : Math.pow(1 + esc / 100, steps);
+  }
   return Math.pow(1 + esc / 100, years);
+}
+
+/* Rent-free handling: rent (MG/RS) bills only from the rent-start date —
+   explicit RentStartDate, else Actual RCD, else documented RCD, else lease start.
+   CAM/utility bill from CamStartDate, else actual handover, else rent start. */
+function rentStartOf(lease) {
+  const d = lease.RentStartDate || lease.ActualRcdDate || lease.DocRentCommencementDate || lease.StartDate;
+  return d ? new Date(d) : null;
+}
+function camStartOf(lease) {
+  const d = lease.CamStartDate || lease.ActualHandoverDate;
+  return d ? new Date(d) : rentStartOf(lease);
+}
+/* Fraction of a billing month on/after `start`: 1 = full month, 0 = not yet started,
+   pro-rata (days/daysInMonth) when the start date falls inside the month. */
+function monthFraction(ym, start) {
+  if (!start || isNaN(start.getTime())) return 1;
+  const [y, m] = ym.split('-').map(Number);
+  const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const monthStart = Date.UTC(y, m - 1, 1);
+  const monthEnd = Date.UTC(y, m - 1, dim);
+  const s = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  if (s <= monthStart) return 1;
+  if (s > monthEnd) return 0;
+  const billedDays = dim - start.getUTCDate() + 1;
+  return billedDays / dim;
+}
+
+/* Slab-based revenue share: RsSlabsJson = [{"upto":1000000,"pct":8},{"upto":null,"pct":10}]
+   The month's sales fall into the first slab whose 'upto' covers them (null = no cap);
+   that slab's single rate applies to the whole month's sales. Falls back to RevSharePct. */
+function rsPctFor(lease, sales) {
+  try {
+    const slabs = JSON.parse(lease.RsSlabsJson || 'null');
+    if (Array.isArray(slabs) && slabs.length) {
+      const sorted = slabs
+        .map(s => ({ upto: s.upto == null || s.upto === '' ? null : Number(s.upto), pct: Number(s.pct) || 0 }))
+        .sort((a, b) => (a.upto == null ? 1 : b.upto == null ? -1 : a.upto - b.upto));
+      for (const s of sorted) if (s.upto == null || sales <= s.upto) return s.pct;
+      return sorted[sorted.length - 1].pct;
+    }
+  } catch (_) { /* bad JSON → fall back */ }
+  return Number(lease.RevSharePct) || 0;
 }
 
 /* GST bifurcation: intra-state → CGST+SGST; inter-state → IGST */
@@ -83,16 +134,20 @@ async function genLeaseInvoices(pool, leaseId, ym, by) {
   const unit = await getUnit(pool, lease.UnitId);
   const { s: due } = monthRange(ym);
   let made = 0;
-  if (['MG', 'MGvsRS'].includes(lease.RentalType) && !(await invoiceExists(pool, leaseId, ym, 'MG'))) {
-    made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}`, mgAmount(lease, unit, ym), ym, due, by);
+  // rent-free handling: scale (or skip) by how much of the month is on/after the start date
+  const rentFrac = monthFraction(ym, rentStartOf(lease));
+  const camFrac = monthFraction(ym, camStartOf(lease));
+  const tag = (frac) => frac < 1 && frac > 0 ? ' (pro-rata)' : '';
+  if (rentFrac > 0 && ['MG', 'MGvsRS'].includes(lease.RentalType) && !(await invoiceExists(pool, leaseId, ym, 'MG'))) {
+    made += await pushInvoice(pool, lease, 'MG', `Minimum Guarantee — ${ym}${tag(rentFrac)}`, round2(mgAmount(lease, unit, ym) * rentFrac), ym, due, by);
   }
-  if (Number(lease.Cam) > 0 && !(await invoiceExists(pool, leaseId, ym, 'CAM'))) {
-    made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${ym}`, Number(lease.Cam) * Number(unit.BuiltupArea), ym, due, by);
+  if (camFrac > 0 && Number(lease.Cam) > 0 && !(await invoiceExists(pool, leaseId, ym, 'CAM'))) {
+    made += await pushInvoice(pool, lease, 'CAM', `CAM charges — ${ym}${tag(camFrac)}`, round2(Number(lease.Cam) * Number(unit.BuiltupArea) * camFrac), ym, due, by);
   }
-  if (Number(lease.Utility) > 0 && !(await invoiceExists(pool, leaseId, ym, 'Utility'))) {
-    made += await pushInvoice(pool, lease, 'Utility', `Utility charges — ${ym}`, Number(lease.Utility) * Number(unit.BuiltupArea), ym, due, by);
+  if (camFrac > 0 && Number(lease.Utility) > 0 && !(await invoiceExists(pool, leaseId, ym, 'Utility'))) {
+    made += await pushInvoice(pool, lease, 'Utility', `Utility charges — ${ym}${tag(camFrac)}`, round2(Number(lease.Utility) * Number(unit.BuiltupArea) * camFrac), ym, due, by);
   }
-  await syncRevShare(pool, leaseId, ym, by);
+  if (rentFrac > 0) await syncRevShare(pool, leaseId, ym, by);
   return made;
 }
 
@@ -103,7 +158,8 @@ async function syncRevShare(pool, leaseId, ym, by) {
   const saleRow = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym)
     .query(`SELECT TOP 1 * FROM ${SCHEMA}.Sales WHERE LeaseId=@l AND Ym=@y`);
   const sales = saleRow.recordset[0] ? Number(saleRow.recordset[0].Amount) : 0;
-  const rs = sales * Number(lease.RevSharePct) / 100;
+  const pct = rsPctFor(lease, sales); // slab-aware; falls back to flat RevSharePct
+  const rs = sales * pct / 100;
   let billable = rs;
   if (lease.RentalType === 'MGvsRS') billable = Math.max(0, rs - mgAmount(lease, unit, ym));
   const existingRow = await pool.request().input('l', sql.VarChar(40), leaseId).input('y', sql.Char(7), ym)
@@ -122,7 +178,7 @@ async function syncRevShare(pool, leaseId, ym, by) {
   const igst = lease.IgstApplicable === true || lease.IgstApplicable === 1;
   const { gstAmt, cgstAmt, sgstAmt, igstAmt } = gstSplit(billable, gstPct, igst);
   const total = round2(billable + gstAmt);
-  const desc = `Revenue share ${lease.RevSharePct}% ${lease.RentalType === 'MGvsRS' ? '(excess over MG) ' : ''}— ${ym}`;
+  const desc = `Revenue share ${pct}% ${lease.RentalType === 'MGvsRS' ? '(excess over MG) ' : ''}— ${ym}`;
   if (existing) {
     await pool.request().input('id', sql.VarChar(40), existing.Id).input('amount', sql.Decimal(18, 2), round2(billable))
       .input('gstAmt', sql.Decimal(18, 2), gstAmt).input('cgstAmt', sql.Decimal(18, 2), cgstAmt)
@@ -147,4 +203,4 @@ async function rentCollectedForUnit(pool, unitId, ym) {
   return Number(row.recordset[0].total) || 0;
 }
 
-module.exports = { mgAmount, escFactor, gstSplit, genLeaseInvoices, syncRevShare, rentCollectedForUnit, getLease, getUnit };
+module.exports = { mgAmount, escFactor, gstSplit, genLeaseInvoices, syncRevShare, rentCollectedForUnit, getLease, getUnit, monthFraction, rentStartOf, camStartOf, rsPctFor, pushInvoice };

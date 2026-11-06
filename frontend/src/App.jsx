@@ -352,6 +352,7 @@ function ViewRouter(props) {
   if (view === 'tdsrecon') return <TdsReconPage {...props} />;
   if (view === 'agreementrecon') return <AgreementReconPage {...props} />;
   if (view === 'sdrecon') return <SdReconPage {...props} />;
+  if (view === 'camtrueup') return <CamTrueupPage {...props} />;
   return null;
 }
 
@@ -1324,7 +1325,10 @@ const LEASE_SECTIONS = [
   ['Billing Config', [
     ['hsnCode', 'HSN/SAC code', 'text'],
     ['paymentTermsDays', 'Payment terms (days from invoice)', 'num'],
-    ['igstApplicable', 'IGST applicable (interstate)', ['', 'Yes', 'No']]
+    ['igstApplicable', 'IGST applicable (interstate)', ['', 'Yes', 'No']],
+    ['interestPct', 'Interest on overdue (% p.a., default 18)', 'num'],
+    ['rentStartDate', 'Rent commencement override (rent-free ends; else Actual RCD is used)', 'date'],
+    ['camStartDate', 'CAM billing start (else actual handover date is used)', 'date']
   ]],
   ['Invoice Party Details', [
     ['lessorName', 'Lessor (SPV) name — appears on invoice', 'text'],
@@ -1397,7 +1401,34 @@ const NFA_ROWS = [
   ['nfaApprovedBy1', 'Approved by', 'text'],
   ['nfaApprovedBy2', 'Approved by (2)', 'text']
 ];
-const ALL_LEASE_KEYS = [...new Set([...LEASE_SECTIONS.flatMap(([, fs]) => fs.map(f => f[0])), ...NFA_ROWS.filter(r => r[0] !== 'section').map(r => r[0])])];
+const ALL_LEASE_KEYS = [...new Set([...LEASE_SECTIONS.flatMap(([, fs]) => fs.map(f => f[0])), ...NFA_ROWS.filter(r => r[0] !== 'section').map(r => r[0]), 'escMode', 'escEveryYears', 'rsSlabsJson'])];
+
+/* Slab editor for variable revenue share — stores [{upto,pct}] JSON on the lease */
+function RsSlabEditor({ value, onChange }) {
+  let slabs = [];
+  try { slabs = JSON.parse(value || '[]'); } catch (_) { slabs = []; }
+  if (!Array.isArray(slabs)) slabs = [];
+  const setSlabs = (next) => onChange(next.length ? JSON.stringify(next) : '');
+  const setRow = (i, k, v) => setSlabs(slabs.map((s, idx) => idx === i ? { ...s, [k]: v === '' ? null : Number(v) } : s));
+  return (
+    <div className="slab-editor">
+      <div className="sectlabel">Revenue-share slabs (optional — leave empty to use the flat RS %)</div>
+      {slabs.map((s, i) => (
+        <div className="grp3" key={i}>
+          <div className="field"><label>{i === slabs.length - 1 && s.upto == null ? 'Sales above previous slab' : 'Monthly sales up to (₹)'}</label>
+            <input type="number" value={s.upto ?? ''} placeholder="blank = no upper cap" onChange={(e) => setRow(i, 'upto', e.target.value)} /></div>
+          <div className="field"><label>Revenue share %</label>
+            <input type="number" step="0.1" value={s.pct ?? ''} onChange={(e) => setRow(i, 'pct', e.target.value)} /></div>
+          <div className="field" style={{ alignSelf: 'end' }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSlabs(slabs.filter((_, idx) => idx !== i))}>Remove</button>
+          </div>
+        </div>
+      ))}
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSlabs([...slabs, { upto: null, pct: '' }])}>+ Add slab</button>
+      {slabs.length > 0 && <div className="sub" style={{ marginTop: 6 }}>The month’s sales fall into the first slab that covers them; that slab’s single rate applies to the whole month.</div>}
+    </div>
+  );
+}
 
 function LeaseFormModal({ id, db, onClose, refresh, notify }) {
   const existing = id ? findById(db.leases, id) : null;
@@ -1533,8 +1564,23 @@ function LeaseFormModal({ id, db, onClose, refresh, notify }) {
             </div>
             <div className="grp2">
               <div className="field"><label>Revenue share %</label><input type="number" step="0.5" value={form.revSharePct} onChange={(e) => set('revSharePct', +e.target.value)} /></div>
-              <div className="field"><label>Annual escalation % (auto-applied each lease anniversary)</label><input type="number" step="0.5" value={form.esc} onChange={(e) => set('esc', +e.target.value)} /></div>
+              <div className="field"><label>Escalation %</label><input type="number" step="0.5" value={form.esc} onChange={(e) => set('esc', +e.target.value)} /></div>
             </div>
+            <div className="grp2">
+              <div className="field"><label>Escalation type</label>
+                <select value={form.escMode || 'Annual'} onChange={(e) => set('escMode', e.target.value)}>
+                  <option value="Annual">Annual — compounds every year</option>
+                  <option value="Stepped">Stepped — once every N years (e.g. 15% every 3 yrs)</option>
+                </select>
+              </div>
+              <div className="field"><label>Step size (years) — for Stepped</label>
+                <input type="number" min="1" value={form.escEveryYears || ''} placeholder="3" disabled={(form.escMode || 'Annual') !== 'Stepped'}
+                  onChange={(e) => set('escEveryYears', e.target.value === '' ? '' : +e.target.value)} />
+              </div>
+            </div>
+            {['PureRS', 'MGvsRS', 'VarRS'].includes(form.rentalType) && (
+              <RsSlabEditor value={form.rsSlabsJson} onChange={(v) => set('rsSlabsJson', v)} />
+            )}
             <div className="grp3">
               <div className="field"><label>CAM (₹/sq ft b-up)</label><input type="number" value={form.cam} onChange={(e) => set('cam', +e.target.value)} /></div>
               <div className="field"><label>Utility (₹/sq ft b-up)</label><input type="number" value={form.utility} onChange={(e) => set('utility', +e.target.value)} /></div>
@@ -2289,7 +2335,23 @@ function ExitLeaseModal({ id, db, onClose, refresh, notify }) {
   const lease = findById(db.leases, id);
   const [exitDate, setExitDate] = React.useState(new Date().toISOString().slice(0, 10));
   const [remarks, setRemarks] = React.useState('');
-  const [ded, setDed] = React.useState([{ label: 'Restoration / repairs', amount: '' }]);
+  // Lock-in breach: if exiting before start + lockinMonths, pre-fill the standard
+  // Indian penalty — rent for the remaining lock-in months (editable/removable).
+  const lockin = (() => {
+    if (!lease || !lease.lockinMonths || !lease.startDate) return null;
+    const end = new Date(lease.startDate + 'T00:00:00Z');
+    end.setUTCMonth(end.getUTCMonth() + Number(lease.lockinMonths));
+    const today = new Date();
+    if (today >= end) return null;
+    const remMonths = Math.ceil((end - today) / (30.44 * 86400000));
+    const unit = findById(db.units, lease.unitId);
+    const monthlyMg = lease.mgBasis === 'PerSqFt' ? (Number(lease.mg) || 0) * (Number(unit?.builtupArea) || 0) : (Number(lease.mg) || 0);
+    return { end: end.toISOString().slice(0, 10), remMonths, penalty: Math.round(remMonths * monthlyMg * 100) / 100 };
+  })();
+  const [ded, setDed] = React.useState(() => lockin && lockin.penalty > 0
+    ? [{ label: `Lock-in breach — ${lockin.remMonths} month(s) remaining (till ${lockin.end})`, amount: String(lockin.penalty) },
+       { label: 'Restoration / repairs', amount: '' }]
+    : [{ label: 'Restoration / repairs', amount: '' }]);
   const [busy, setBusy] = React.useState(false);
   if (!lease) return null;
   const outstanding = Math.round(db.invoices.filter((i) => i.leaseId === id)
@@ -2313,6 +2375,7 @@ function ExitLeaseModal({ id, db, onClose, refresh, notify }) {
   return (
     <Modal title={`Exit & SD settlement — ${lease.code} (${nameOf(db.brands, lease.brandId)})`} onClose={onClose} onSave={save} saveLabel={busy ? 'Settling…' : 'Confirm exit & settle'} wide>
       <Callout>Marks the lease <b>Exited</b>, frees the unit, and records the settlement below in the register. Clear pending receipts/credit notes first if the dues figure looks wrong.</Callout>
+      {lockin && <Callout warn>⚠ Exit is inside the <b>lock-in period</b> (ends {fmtDate(lockin.end)}). Standard penalty of <b>{money0(lockin.penalty)}</b> ({lockin.remMonths} month(s) × monthly MG) has been pre-filled below — edit or remove it as per the negotiated settlement.</Callout>}
       <div className="grp2">
         <div className="field"><label>Exit / vacate date</label><input type="date" value={exitDate} onChange={(e) => setExitDate(e.target.value)} /></div>
         <div className="field"><label>Remarks</label><input value={remarks} placeholder="e.g. Keys received, unit inspected" onChange={(e) => setRemarks(e.target.value)} /></div>
@@ -3568,6 +3631,92 @@ function SdReconPage({ notify }) {
           )}
         </div>
       </div>
+    </>
+  );
+}
+
+/* ── CAM True-up: year-end budgeted vs actual CAM reconciliation ── */
+function CamTrueupPage({ db, notify, actingRole, refresh }) {
+  const canEditInv = canEdit(actingRole, 'invoices'); // raising a differential is an invoice action
+  const [year, setYear] = React.useState(String(new Date().getFullYear()));
+  const [rate, setRate] = React.useState('');
+  const [data, setData] = React.useState(null);
+  const [busy, setBusy] = React.useState('');
+
+  const run = async () => {
+    if (!rate || Number(rate) <= 0) return notify('Enter the ACTUAL CAM cost per sq ft per month for the year.', true);
+    setBusy('run');
+    try { setData(await api.reports.camTrueup(year, Number(rate))); }
+    catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+  const raiseDiff = async (r) => {
+    setBusy(r.leaseId);
+    try {
+      const res = await api.invoices.adhoc({
+        leaseId: r.leaseId, ym: `${year}-12`,
+        desc: `CAM true-up ${year} — actual ₹${r.actualRate}/sqft vs billed (${r.monthsBilled} months)`,
+        amount: r.diff, gstPct: 18
+      });
+      notify(`Differential invoice ${res.no} raised for ${r.leaseCode} (pending approval).`);
+      await refresh(['invoices']);
+      await run();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+  const exportCSV = () => {
+    if (!data) return;
+    const hdr = [['Lease', 'Brand', 'Unit', 'Area (sqft)', 'Budget Rate', 'Actual Rate', 'Months Billed', 'CAM Billed', 'CAM Actual', 'Differential']];
+    download(`cam_trueup_${year}.csv`, toCSV([...hdr, ...data.rows.map(r => [r.leaseCode, r.brandName, r.unitName, r.area, r.budgetRate, r.actualRate, r.monthsBilled, r.camBilled, r.camActual, r.diff])]));
+    notify('Exported CAM true-up.');
+  };
+  const totals = data ? data.rows.reduce((t, r) => ({ b: t.b + r.camBilled, a: t.a + r.camActual, d: t.d + r.diff }), { b: 0, a: 0, d: 0 }) : null;
+
+  return (
+    <>
+      <Callout>Year-end CAM reconciliation: compare CAM <b>billed at the budgeted rate</b> with the <b>actual cost per sq ft</b> for the year.
+        Under-billed → raise a differential invoice; over-billed → issue a credit note against the tenant’s last CAM invoice.</Callout>
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <div className="field" style={{ maxWidth: 120, margin: 0 }}><label>Year</label>
+          <input type="number" value={year} onChange={(e) => setYear(e.target.value)} /></div>
+        <div className="field" style={{ maxWidth: 260, margin: 0 }}><label>Actual CAM cost (₹/sq ft/month)</label>
+          <input type="number" step="0.01" value={rate} placeholder="e.g. 24.50" onChange={(e) => setRate(e.target.value)} /></div>
+        <button className="btn btn-teal" style={{ alignSelf: 'end' }} disabled={busy === 'run'} onClick={run}>{busy === 'run' ? 'Computing…' : 'Compute true-up'}</button>
+        {data && <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'end' }} onClick={exportCSV}>⬇ Excel CSV</button>}
+      </div>
+      {data && (
+        <>
+          <div className="kpirow" style={{ margin: '14px 0 16px', gridTemplateColumns: 'repeat(3,1fr)' }}>
+            <div className="kpi"><div className="kpi-l">CAM billed (budget)</div><div className="kpi-v">{money0(totals.b)}</div></div>
+            <div className="kpi"><div className="kpi-l">CAM at actuals</div><div className="kpi-v">{money0(totals.a)}</div></div>
+            <div className="kpi"><div className="kpi-l">Net differential</div><div className="kpi-v" style={{ color: totals.d > 0 ? 'var(--amber)' : 'var(--green)' }}>{money0(totals.d)}</div></div>
+          </div>
+          <div className="tablewrap">
+            {data.rows.length === 0 ? <EmptyMini text={`No CAM invoices found for ${year}.`} /> : (
+              <table>
+                <thead><tr><th>Lease / Brand</th><th className="num">Area</th><th className="num">Budget ₹/sqft</th><th className="num">Months</th><th className="num">Billed</th><th className="num">Actual</th><th className="num">Differential</th><th></th></tr></thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.leaseId}>
+                      <td><span className="code">{r.leaseCode}</span><div className="sub">{r.brandName} · {r.unitName}</div></td>
+                      <td className="num">{r.area.toLocaleString('en-IN')}</td>
+                      <td className="num">{r.budgetRate}</td>
+                      <td className="num sub">{r.monthsBilled}</td>
+                      <td className="num">{money0(r.camBilled)}</td>
+                      <td className="num">{money0(r.camActual)}</td>
+                      <td className="num strong" style={{ color: r.diff > 0 ? 'var(--amber)' : r.diff < 0 ? 'var(--green)' : 'inherit' }}>{money0(r.diff)}</td>
+                      <td className="rowact">
+                        {canEditInv && r.diff > 0.5 && <button className="btn btn-teal btn-sm" disabled={busy === r.leaseId} onClick={() => raiseDiff(r)}>{busy === r.leaseId ? 'Raising…' : 'Raise differential'}</button>}
+                        {r.diff < -0.5 && <span className="sub">over-billed — issue CN</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
     </>
   );
 }

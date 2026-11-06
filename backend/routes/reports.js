@@ -245,4 +245,42 @@ router.get('/alerts', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* CAM true-up: year-end reconciliation of budgeted (billed) CAM vs actual cost.
+   GET /api/reports/cam-trueup?year=2026&rate=24.5
+   rate = ACTUAL CAM cost per sq ft per month for the year.
+   Per lease: CAM billed in the year vs area × rate × months-billed → differential.
+   Positive diff = under-billed → raise a differential ad-hoc invoice;
+   negative = over-billed → issue a credit note. */
+router.get('/cam-trueup', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const year = String(req.query.year || new Date().getFullYear()).slice(0, 4);
+    const rate = Number(req.query.rate) || 0;
+    const r = await pool.request().input('y', sql.VarChar(5), year + '%').query(`
+      SELECT l.Id AS LeaseId, l.Code, l.Cam, b.Name AS BrandName, u.Name AS UnitName, u.BuiltupArea,
+        ISNULL(cb.months, 0) AS MonthsBilled, ISNULL(cb.billed, 0) AS CamBilled,
+        (SELECT TOP 1 i2.Id FROM ${SCHEMA}.Invoices i2 WHERE i2.LeaseId=l.Id AND i2.Type='CAM' AND i2.Ym LIKE @y ORDER BY i2.Ym DESC) AS LastCamInvoiceId
+      FROM ${SCHEMA}.Leases l
+      JOIN ${SCHEMA}.Brands b ON b.Id=l.BrandId
+      JOIN ${SCHEMA}.Units u ON u.Id=l.UnitId
+      OUTER APPLY (SELECT COUNT(*) months, SUM(i.Amount) billed FROM ${SCHEMA}.Invoices i
+                   WHERE i.LeaseId=l.Id AND i.Type='CAM' AND i.Ym LIKE @y) cb
+      WHERE ISNULL(cb.months,0) > 0
+      ORDER BY l.Code`);
+    const rows = r.recordset.map(x => {
+      const area = Number(x.BuiltupArea) || 0;
+      const billed = Math.round(Number(x.CamBilled) * 100) / 100;
+      const actual = Math.round(area * rate * Number(x.MonthsBilled) * 100) / 100;
+      return {
+        leaseId: x.LeaseId, leaseCode: x.Code, brandName: x.BrandName, unitName: x.UnitName,
+        area, budgetRate: Number(x.Cam), actualRate: rate,
+        monthsBilled: Number(x.MonthsBilled), camBilled: billed, camActual: actual,
+        diff: Math.round((actual - billed) * 100) / 100,
+        lastCamInvoiceId: x.LastCamInvoiceId
+      };
+    });
+    res.json({ year, rate, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;

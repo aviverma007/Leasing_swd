@@ -13,6 +13,13 @@ function mapInvoice(r, paid, credited) {
   if (settled <= 0) status = 'Unpaid';
   else if (settled + 0.5 >= total) status = 'Paid';
   else status = 'Partial';
+  // interest on overdue — accrued @ lease InterestPct p.a. (default 18%) on open balance
+  const balance0 = round2(total - p - cr);
+  const today = new Date();
+  const due = new Date(r.DueDate);
+  const daysOverdue = balance0 > 0.5 && due < today ? Math.floor((today - due) / 86400000) : 0;
+  const interestPct = Number(r.LeaseInterestPct) > 0 ? Number(r.LeaseInterestPct) : 18;
+  const interestAccrued = daysOverdue > 0 ? round2(balance0 * interestPct / 100 * daysOverdue / 365) : 0;
   return {
     id: r.Id, no: r.No, type: r.Type, leaseId: r.LeaseId, brandId: r.BrandId, unitId: r.UnitId, ym: r.Ym,
     desc: r.Descr, amount: Number(r.Amount), gstPct: Number(r.GstPct), gstAmt: Number(r.GstAmt),
@@ -25,7 +32,8 @@ function mapInvoice(r, paid, credited) {
     approvedBy: r.ApprovedBy || null,
     approvedAt: r.ApprovedAt ? new Date(r.ApprovedAt).toISOString() : null,
     rejectReason: r.RejectReason || null, createdBy: r.CreatedBy || null,
-    createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null
+    createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null,
+    daysOverdue, interestPct, interestAccrued
   };
 }
 
@@ -37,7 +45,8 @@ router.get('/', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
-      SELECT i.*, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i
+      SELECT i.*, l.InterestPct AS LeaseInterestPct, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited FROM ${SCHEMA}.Invoices i
+      LEFT JOIN ${SCHEMA}.Leases l ON l.Id = i.LeaseId
       ${PAID_APPLY(SCHEMA)}
       ${CRED_APPLY(SCHEMA)}
       ORDER BY i.DueDate DESC`);
@@ -127,6 +136,60 @@ router.post('/:id/sd-adjust', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* Bill accrued interest on an overdue invoice as an ad-hoc invoice (one click).
+   Interest = balance × lease InterestPct (default 18% p.a.) × days overdue / 365. */
+router.post('/:id/bill-interest', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const invRow = await pool.request().input('id', sql.VarChar(40), req.params.id).query(`
+      SELECT i.*, l.InterestPct AS LeaseInterestPct, l.Gst AS LeaseGst, ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited
+      FROM ${SCHEMA}.Invoices i
+      LEFT JOIN ${SCHEMA}.Leases l ON l.Id = i.LeaseId
+      ${PAID_APPLY(SCHEMA)} ${CRED_APPLY(SCHEMA)}
+      WHERE i.Id=@id`);
+    const inv = invRow.recordset[0];
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    const balance = round2(Number(inv.Total) - Number(inv.Paid) - Number(inv.Credited));
+    const due = new Date(inv.DueDate);
+    const days = Math.floor((Date.now() - due.getTime()) / 86400000);
+    if (balance <= 0.5) return res.status(400).json({ error: 'Invoice is settled — nothing overdue to charge interest on.' });
+    if (days <= 0) return res.status(400).json({ error: 'Invoice is not overdue yet.' });
+    const pct = Number(inv.LeaseInterestPct) > 0 ? Number(inv.LeaseInterestPct) : 18;
+    const interest = round2(balance * pct / 100 * days / 365);
+    if (interest <= 0) return res.status(400).json({ error: 'Accrued interest is zero.' });
+
+    const leaseRow = await pool.request().input('id', sql.VarChar(40), inv.LeaseId).query(`SELECT * FROM ${SCHEMA}.Leases WHERE Id=@id`);
+    const lease = leaseRow.recordset[0];
+    const gstPct = Number(lease?.Gst) || 18; // interest on delayed rent carries GST at the principal supply's rate
+    const igst = lease && (lease.IgstApplicable === true || lease.IgstApplicable === 1);
+    const { gstAmt, cgstAmt, sgstAmt, igstAmt } = gstSplit(interest, gstPct, igst);
+    const total = round2(interest + gstAmt);
+    const id = uid();
+    const no = await nextNo(pool, sql, 'INV');
+    const by = (req.user && (req.user.email || req.user.username)) || 'system';
+    await pool.request()
+      .input('id', sql.VarChar(40), id).input('no', sql.VarChar(20), no).input('type', sql.VarChar(20), 'Adhoc')
+      .input('leaseId', sql.VarChar(40), inv.LeaseId).input('brandId', sql.VarChar(40), inv.BrandId).input('unitId', sql.VarChar(40), inv.UnitId)
+      .input('ym', sql.Char(7), inv.Ym)
+      .input('desc', sql.NVarChar(300), `Interest on overdue ${inv.No} — ${days} days @ ${pct}% p.a. on ₹${balance}`)
+      .input('amount', sql.Decimal(18, 2), interest)
+      .input('gstPct', sql.Decimal(9, 3), gstPct).input('gstAmt', sql.Decimal(18, 2), gstAmt)
+      .input('cgstAmt', sql.Decimal(18, 2), cgstAmt).input('sgstAmt', sql.Decimal(18, 2), sgstAmt).input('igstAmt', sql.Decimal(18, 2), igstAmt)
+      .input('total', sql.Decimal(18, 2), total).input('due', sql.Date, new Date().toISOString().slice(0, 10))
+      .input('irn', sql.VarChar(64), irnHex())
+      .input('hsnCode', sql.VarChar(20), inv.HsnCode || '997212').input('paymentTermsDays', sql.Int, inv.PaymentTermsDays || 7)
+      .input('ackNo', sql.VarChar(20), String(Math.floor(1e11 + Math.random() * 9e11)))
+      .input('ackDate', sql.DateTime2, new Date()).input('pos', sql.NVarChar(60), inv.PlaceOfSupply || 'HARYANA')
+      .input('by', sql.NVarChar(150), by)
+      .query(`INSERT INTO ${SCHEMA}.Invoices (Id,No,Type,LeaseId,BrandId,UnitId,Ym,Descr,Amount,GstPct,GstAmt,CgstAmt,SgstAmt,IgstAmt,Total,DueDate,Irn,Status,HsnCode,PaymentTermsDays,AckNo,AckDate,PlaceOfSupply,DocStatus,CreatedBy,CreatedAt)
+        VALUES (@id,@no,@type,@leaseId,@brandId,@unitId,@ym,@desc,@amount,@gstPct,@gstAmt,@cgstAmt,@sgstAmt,@igstAmt,@total,@due,@irn,'Unpaid',@hsnCode,@paymentTermsDays,@ackNo,@ackDate,@pos,'Pending',@by,SYSDATETIME())`);
+    const { logAudit } = require('../lib/audit');
+    await logAudit(pool, 'invoices', id, 'created', `Interest invoice ${no}: ₹${interest} (+GST) on ${inv.No}, ${days} days overdue @ ${pct}%`, by);
+    await logAudit(pool, 'invoices', req.params.id, 'interest-billed', `Interest ₹${interest} billed as ${no} (${days} days @ ${pct}% p.a.)`, by);
+    res.json({ id, no, interest, days, pct, total });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* Auto-generate MG/RevShare/CAM/Utility invoices for a month */
 router.post('/generate', async (req, res) => {
   try {
@@ -159,13 +222,20 @@ router.post('/generate', async (req, res) => {
       // Explain exactly why this single lease produced nothing
       const lr = await pool.request().input('id', sql.VarChar(40), leases[0]).input('ym', sql.Char(7), ym)
         .query(`SELECT l.Code, l.RentalType, l.Mg, l.MgBasis, l.Cam, l.Utility, l.LifecycleStage, u.BuiltupArea,
+          l.RentStartDate, l.ActualRcdDate, l.DocRentCommencementDate, l.StartDate,
           (SELECT COUNT(*) FROM ${SCHEMA}.Invoices i WHERE i.LeaseId=l.Id AND i.Ym=@ym AND i.Type='MG') AS MgBilled
           FROM ${SCHEMA}.Leases l JOIN ${SCHEMA}.Units u ON u.Id=l.UnitId WHERE l.Id=@id`)
         .catch(() => null);
       const row = lr && lr.recordset[0];
       if (row) {
+        const { monthFraction, rentStartOf } = require('../lib/billing');
+        const rentFrac = monthFraction(ym, rentStartOf(row));
         const computedMg = row.MgBasis === 'PerSqFt' ? Number(row.Mg) * Number(row.BuiltupArea || 0) : Number(row.Mg);
         if ((row.LifecycleStage || 'Active') !== 'Active') reason = `${row.Code}: lease is in '${row.LifecycleStage}' stage — billing starts at the 'Active' stage.`;
+        else if (rentFrac === 0) {
+          const rs = rentStartOf(row);
+          reason = `${row.Code}: inside the rent-free period — rent commences ${rs ? rs.toISOString().slice(0, 10) : '(rent start date)'}.`;
+        }
         else if (row.MgBilled > 0) reason = `${row.Code}: ${ym} is already billed for this lease.`;
         else if (['MG', 'MGvsRS'].includes(row.RentalType) && computedMg <= 0) reason = `${row.Code}: MG rate is 0 — set the MG value on the lease first.`;
         else if (!['MG', 'MGvsRS'].includes(row.RentalType)) reason = `${row.Code}: ${row.RentalType} lease — bills only after sales are entered for ${ym}.`;

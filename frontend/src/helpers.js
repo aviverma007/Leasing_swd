@@ -219,6 +219,7 @@ export const NAV = [
   { v: 'tdsrecon', label: 'TDS Reconciliation' },
   { v: 'agreementrecon', label: 'Agreement Recon' },
   { v: 'sdrecon', label: 'SD Reconciliation' },
+  { v: 'camtrueup', label: 'CAM True-up' },
   { grp: 'Admin' },
   { v: 'deletions', label: 'Pending Deletions' },
   { v: 'roleprofiles', label: 'Role Profiles' }
@@ -252,6 +253,7 @@ export const PAGES = {
   tdsrecon: { t: 'TDS Reconciliation', s: 'TDS deducted on collections — for Form 26Q / 27Q' },
   agreementrecon: { t: 'Agreement Reconciliation', s: 'Lease terms vs actual billing per brand and unit' },
   sdrecon: { t: 'Security Deposit Reconciliation', s: 'SD agreed, collected, adjusted and balance per lease' },
+  camtrueup: { t: 'CAM True-up', s: 'Year-end reconciliation — budgeted CAM billed vs actual cost per sq ft' },
   deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' },
   roleprofiles: { t: 'Role Profiles', s: 'Define what each role can view or edit — Admin always has full access' }
 };

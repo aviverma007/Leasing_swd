@@ -81,6 +81,13 @@ const LEASE_FIELDS = [
   ['hsnCode', 'HsnCode', 'str', 20],
   ['paymentTermsDays', 'PaymentTermsDays', 'int'],
   ['igstApplicable', 'IgstApplicable', 'int'],
+  // v4.1 — Indian-market billing scenarios
+  ['escMode', 'EscMode', 'str', 20],              // 'Annual' (compound yearly) | 'Stepped' (every N years)
+  ['escEveryYears', 'EscEveryYears', 'int'],      // step size for 'Stepped' (e.g. 3 → +esc% every 3 years)
+  ['interestPct', 'InterestPct', 'dec'],          // p.a. interest on overdue invoices (default 18)
+  ['rsSlabsJson', 'RsSlabsJson', 'str', 1000],    // [{"upto":1000000,"pct":8},{"upto":null,"pct":10}]
+  ['rentStartDate', 'RentStartDate', 'date'],     // rent-free override; else ActualRcd → DocRentCommencement → StartDate
+  ['camStartDate', 'CamStartDate', 'date'],       // CAM billing start; else ActualHandover → rent start
   // Invoice party details — per-lease lessor/lessee overrides (SPV-wise invoicing)
   ['lessorName', 'LessorName', 'str', 200],
   ['lessorAddress', 'LessorAddress', 'str', 500],

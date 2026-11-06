@@ -224,7 +224,10 @@ function LeaseRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) 
               <KV label="MG">{l.mg ? money(l.mg) + (l.mgBasis === 'PerSqFt' ? ' / sq ft' : ' lumpsum') : '—'}</KV>
               <KV label="Revenue share">{l.revSharePct ? l.revSharePct + '%' : '—'}</KV>
               <KV label="CAM / Utility">{money0(l.cam)} / {money0(l.utility)} per sq ft</KV>
-              <KV label="Escalation">{l.esc ? l.esc + '% p.a.' : '—'}</KV>
+              <KV label="Escalation">{l.esc ? (l.escMode === 'Stepped' ? `${l.esc}% every ${l.escEveryYears || 3} years` : l.esc + '% p.a. (compounding)') : '—'}</KV>
+              <KV label="Rent commences">{l.rentStartDate || l.actualRcdDate || l.docRentCommencementDate ? fmtDate(l.rentStartDate || l.actualRcdDate || l.docRentCommencementDate) : 'lease start (no rent-free)'}</KV>
+              <KV label="Interest on overdue">{(l.interestPct || 18) + '% p.a.'}</KV>
+              <KV label="Lock-in">{l.lockinMonths ? l.lockinMonths + ' months (penalty auto-suggested on early exit)' : '—'}</KV>
               <KV label="GST">{l.gst}%</KV>
               <KV label="Security deposit">{l.deposit ? money0(l.deposit) : '—'}</KV>
               <KV label="HSN / Pay terms">{(l.hsnCode || '997212') + ' · ' + (l.paymentTermsDays || 7) + ' days'}</KV>
@@ -300,12 +303,22 @@ function LeaseRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) 
 }
 
 function InvoiceRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) {
+  const [busyInt, setBusyInt] = useState(false);
   const i = findById(db.invoices, id);
   if (!i) return <Callout warn>Invoice not found. <a onClick={() => go('invoices')}>Back to Invoices</a></Callout>;
   const lease = findById(db.leases, i.leaseId);
   const colls = (db.collections || []).filter((c) => c.invoiceId === id);
   const edit = canEdit(actingRole, 'invoices');
   const after = async () => { await refresh(['invoices', 'collections']); };
+  const billInterest = async () => {
+    setBusyInt(true);
+    try {
+      const r = await api.invoices.billInterest(id);
+      notify(`Interest invoice ${r.no} raised: ₹${r.interest.toLocaleString('en-IN')} (+GST) for ${r.days} days @ ${r.pct}% — pending approval.`);
+      await refresh(['invoices']);
+    } catch (e) { notify(e.message, true); }
+    finally { setBusyInt(false); }
+  };
   return (
     <RecordShell go={go}
       crumbs={[{ label: 'Billing', view: 'invoices' }, { label: 'Invoices', view: 'invoices' }, { label: i.no }]}
@@ -345,6 +358,16 @@ function InvoiceRecordPage({ id, db, go, setModal, refresh, notify, actingRole }
                 <tr className="tot"><td><b>Balance</b></td><td className="r"><b>{money(i.balance)}</b></td></tr>
               </tbody>
             </table>
+            {i.daysOverdue > 0 && i.balance > 0 && (
+              <div className="int-strip">
+                <span>⏰ <b>{i.daysOverdue} days overdue</b> — interest accrued @ {i.interestPct}% p.a.: <b>{money(i.interestAccrued)}</b></span>
+                {edit && i.interestAccrued > 0 && (
+                  <button className="btn btn-teal btn-sm" disabled={busyInt} onClick={billInterest}>
+                    {busyInt ? 'Raising…' : 'Bill interest'}
+                  </button>
+                )}
+              </div>
+            )}
           </RSection>
           <RSection title={`Receipts against this invoice (${colls.length})`}>
             {colls.length === 0 ? <div className="sub">No receipts yet.</div> : (
@@ -376,18 +399,54 @@ function InvoiceRecordPage({ id, db, go, setModal, refresh, notify, actingRole }
 }
 
 function CollectionRecordPage({ id, db, go, refresh, notify, actingRole }) {
+  const [bouncing, setBouncing] = useState(false);
+  const [bReason, setBReason] = useState('');
+  const [bCharges, setBCharges] = useState('');
+  const [bBusy, setBBusy] = useState(false);
   const c = findById(db.collections, id);
   if (!c) return <Callout warn>Receipt not found. <a onClick={() => go('collections')}>Back to Collections</a></Callout>;
   const inv = findById(db.invoices, c.invoiceId);
   const after = async () => { await refresh(['collections', 'invoices']); };
+  const edit = canEdit(actingRole, 'collections');
+  const doBounce = async () => {
+    if (!bReason.trim()) return notify('Enter the bounce/reversal reason.', true);
+    setBBusy(true);
+    try {
+      const r = await api.collections.bounce(id, bReason.trim(), Number(bCharges) || 0);
+      notify(`Receipt ${c.no} reversed — balance restored on ${inv?.no || 'the invoice'}.`
+        + (r.chargeInvoice ? ` Bounce charges billed as ${r.chargeInvoice.no} (pending approval).` : ''));
+      setBouncing(false);
+      await after();
+    } catch (e) { notify(e.message, true); }
+    finally { setBBusy(false); }
+  };
   return (
     <RecordShell go={go}
       crumbs={[{ label: 'Billing', view: 'collections' }, { label: 'Collections', view: 'collections' }, { label: c.no }]}
       title={`${c.no} — ${money0(c.amount)}`}
       pills={<><DocStatusPill st={c.docStatus} />{Number(c.sdAdjAmt) > 0 && <Pill color="violet">SD Adjustment</Pill>}</>}
-      actions={null}>
+      actions={edit && (c.docStatus || 'Approved') !== 'Rejected' &&
+        <button className="btn btn-danger btn-sm" onClick={() => setBouncing(!bouncing)}>⚠ Cheque bounced / reverse</button>}>
       <WorkflowBar type="collections" id={id} doc={c} actingRole={actingRole} afterChange={after} notify={notify} />
       {(c.docStatus || 'Approved') === 'Pending' && <Callout warn>This receipt counts in the tenant’s balance only after a checker approves it.</Callout>}
+      {(c.docStatus || 'Approved') === 'Rejected' && (c.rejectReason || '').startsWith('Bounced') && (
+        <Callout warn>↩ This receipt was <b>reversed (bounced)</b> — it no longer counts anywhere. {c.rejectReason}</Callout>
+      )}
+      {bouncing && (
+        <div className="panel rsec"><div className="pb" style={{ padding: 14 }}>
+          <div className="grp2">
+            <div className="field"><label>Reason <span className="req">*</span></label>
+              <input value={bReason} placeholder={`e.g. Cheque ${c.ref || ''} returned — insufficient funds`} onChange={(e) => setBReason(e.target.value)} /></div>
+            <div className="field"><label>Bounce charges to bill the tenant (₹, optional)</label>
+              <input type="number" value={bCharges} placeholder="e.g. 500" onChange={(e) => setBCharges(e.target.value)} /></div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-danger btn-sm" disabled={bBusy} onClick={doBounce}>{bBusy ? 'Reversing…' : 'Confirm reversal'}</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setBouncing(false)}>Cancel</button>
+          </div>
+          <div className="sub" style={{ marginTop: 8 }}>Reverses the receipt (balance restored on the invoice), logs it in the activity trail, and optionally raises a GST ad-hoc invoice for the bounce charges.</div>
+        </div></div>
+      )}
       <div className="record-grid">
         <div>
           <RSection title="Receipt details">

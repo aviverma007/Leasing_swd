@@ -73,9 +73,13 @@ export const api = {
     generatePool: (ym, leaseIds, desc) => req('POST', '/invoices/generate-pool', { ym, leaseIds, desc }),
     adhoc: (body) => req('POST', '/invoices/adhoc', body),
     print: (id) => req('GET', `/invoices/${id}/print`),
-    sdAdjust: (id, sdAdjAmt, note) => req('POST', `/invoices/${id}/sd-adjust`, { sdAdjAmt, note })
+    sdAdjust: (id, sdAdjAmt, note) => req('POST', `/invoices/${id}/sd-adjust`, { sdAdjAmt, note }),
+    billInterest: (id) => req('POST', `/invoices/${id}/bill-interest`)
   },
-  collections: crud('/collections'),
+  collections: {
+    ...crud('/collections'),
+    bounce: (id, reason, charges) => req('POST', `/collections/${id}/bounce`, { reason, charges })
+  },
   creditNotes: {
     list: () => req('GET', '/credit-notes'),
     create: (body) => req('POST', '/credit-notes', body)
@@ -116,7 +120,8 @@ export const api = {
     tdsRecon: () => req('GET', '/reports/tds-recon'),
     agreementRecon: () => req('GET', '/reports/agreement-recon'),
     sdRecon: () => req('GET', '/reports/sd-recon'),
-    alerts: () => req('GET', '/reports/alerts')
+    alerts: () => req('GET', '/reports/alerts'),
+    camTrueup: (year, rate) => req('GET', `/reports/cam-trueup?year=${year}&rate=${rate}`)
   },
   deletionRequests: {
     list: (status) => req('GET', '/deletion-requests' + (status ? `?status=${status}` : '')),
