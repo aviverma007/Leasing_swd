@@ -119,7 +119,9 @@ export function ReminderModal({ preview, onClose, notify, afterSent }) {
         ? <>On confirm it is e-mailed to the address below{preview.cc ? <> (cc {preview.cc})</> : null}{preview.attachInvoice ? ', with the invoice statement attached,' : ''} and logged.</>
         : <>{preview.mailerEnabled ? 'Enter an e-mail address to send, or confirm to record only' : 'SMTP is not configured — on confirm it is logged and you can copy the text into Outlook'}.</>}
         {preview.dunningHold ? <> <b>Note:</b> auto-reminders are paused on this lease ({preview.dunningHoldNote}) — sending now is a manual override.</> : null}</Callout>}
-      {sent && sent.channel !== 'email' && <Callout warn>E-mail was not sent ({to.trim() ? 'SMTP not configured' : 'no e-mail address'}) — the reminder is logged; copy this text and send it from Outlook.</Callout>}
+      {sent && sent.channel !== 'email' && <Callout warn>E-mail was not sent — {sent.mailResult && sent.mailResult.error
+        ? <>the mail server rejected it: <b style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{sent.mailResult.error}</b></>
+        : (to.trim() ? 'SMTP not configured' : 'no e-mail address')}. The reminder is logged; copy this text and send it from Outlook.</Callout>}
       {sent && sent.channel === 'email' && <Callout>Reminder e-mailed to <b>{sent.toEmail}</b>{sent.cc ? <> (cc {sent.cc})</> : null} and logged.</Callout>}
       <div className="field"><label>To (e-mail){preview.toEmail ? ' — prefilled from Brand Master, edit if needed' : ' — no billing email saved for this brand, type one'}</label>
         <input type="email" placeholder="accounts@tenant.com" value={to} disabled={!!sent} onChange={(e) => setTo(e.target.value)} /></div>
