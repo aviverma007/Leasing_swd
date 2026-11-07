@@ -70,6 +70,7 @@ router.get('/:invoiceId/preview', async (req, res) => {
       stage: st.stage, stageLabel: st.label,
       toEmail: row.BrandEmail || null, cc: cfg.cc || null,
       subject, body,
+      mailerEnabled: require('../lib/mailer').enabled(),
       willEmail: require('../lib/mailer').enabled() && !!row.BrandEmail,
       attachInvoice: !!cfg.attachInvoice,
       dunningHold: !!row.DunningHold, dunningHoldNote: row.DunningHoldNote || ''
@@ -95,9 +96,14 @@ router.post('/:invoiceId/remind', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'Invoice is not overdue (or not found/approved).' });
     const st = stageFor(row.DaysOverdue, cfg) || stagesFor(cfg)[0];
     const by = userName(req);
-    const { subject, body, channel, mailResult } = await sendReminder(pool, row, st, cfg, by);
-    await logAudit(pool, 'invoices', row.Id, 'reminder', `Stage-${st.stage} ${st.label} ${channel === 'email' ? 'e-mailed to ' + row.BrandEmail + (cfg.cc ? ' (cc ' + cfg.cc + ')' : '') : 'recorded (no SMTP/e-mail — copy the text below)'}${row.DunningHold ? ' — sent manually while auto-reminders are paused' : ''}`, by);
-    res.json({ stage: st.stage, stageLabel: st.label, channel, toEmail: row.BrandEmail, cc: cfg.cc || null, subject, body, mailResult, dunningHold: !!row.DunningHold });
+    let toOverride = String(req.body?.toEmail || '').trim();
+    if (toOverride && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(toOverride)) {
+      return res.status(400).json({ error: `"${toOverride}" is not a valid e-mail address.` });
+    }
+    const { subject, body, channel, mailResult, toEmail } = await sendReminder(pool, row, st, cfg, by, toOverride || null);
+    const edited = toOverride && toOverride !== (row.BrandEmail || '');
+    await logAudit(pool, 'invoices', row.Id, 'reminder', `Stage-${st.stage} ${st.label} ${channel === 'email' ? 'e-mailed to ' + toEmail + (edited ? ' (address edited in the popup)' : '') + (cfg.cc ? ' (cc ' + cfg.cc + ')' : '') : 'recorded (no SMTP/e-mail — copy the text below)'}${row.DunningHold ? ' — sent manually while auto-reminders are paused' : ''}`, by);
+    res.json({ stage: st.stage, stageLabel: st.label, channel, toEmail, cc: cfg.cc || null, subject, body, mailResult, dunningHold: !!row.DunningHold });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -3,7 +3,7 @@
    timeline and comments), plus the command palette and the approvals inbox. */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { api, getToken } from './api.js';
-import { Pill, Callout } from './components.jsx';
+import { Pill, Callout, ReminderModal } from './components.jsx';
 import { money, money0, fmtDate, ymLabel, nameOf, findById, MASTER_SCHEMA } from './helpers.js';
 import { canView, canEdit, canApproveRole } from './permissions.js';
 
@@ -367,12 +367,22 @@ function LeaseRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) 
 
 function InvoiceRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) {
   const [busyInt, setBusyInt] = useState(false);
+  const [remBusy, setRemBusy] = useState(false);
+  const [remPreview, setRemPreview] = useState(null);
   const i = findById(db.invoices, id);
   if (!i) return <Callout warn>Invoice not found. <a onClick={() => go('invoices')}>Back to Invoices</a></Callout>;
   const lease = findById(db.leases, i.leaseId);
   const colls = (db.collections || []).filter((c) => c.invoiceId === id);
   const edit = canEdit(actingRole, 'invoices');
   const after = async () => { await refresh(['invoices', 'collections']); };
+  const openReminder = async () => {
+    setRemBusy(true);
+    try {
+      const p = await api.dunning.preview(id);
+      setRemPreview({ ...p, invoiceId: id });
+    } catch (e) { notify(e.message, true); }
+    finally { setRemBusy(false); }
+  };
   const billInterest = async () => {
     setBusyInt(true);
     try {
@@ -392,7 +402,10 @@ function InvoiceRecordPage({ id, db, go, setModal, refresh, notify, actingRole }
         {edit && i.status !== 'Paid' && <button className="btn btn-teal btn-sm" onClick={() => setModal({ type: 'collection', invoiceId: id })}>Collect</button>}
         {edit && <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'creditNote', invoice: i })}>CN / DN</button>}
         {edit && <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'sdAdjust', id })}>SD Adjust</button>}
+        {canEdit(actingRole, 'collections') && i.status !== 'Paid' && (i.docStatus || 'Approved') === 'Approved' && new Date(i.dueDate) < new Date()
+          && <button className="btn btn-teal btn-sm" disabled={remBusy} onClick={openReminder}>{remBusy ? 'Opening…' : '✉ Send reminder…'}</button>}
       </>}>
+      {remPreview && <ReminderModal preview={remPreview} onClose={() => setRemPreview(null)} notify={notify} afterSent={after} />}
       <WorkflowBar type="invoices" id={id} doc={i} actingRole={actingRole} afterChange={after} notify={notify} />
       {(i.docStatus || 'Approved') !== 'Approved' && <Callout warn>This invoice can be printed only after a checker approves it.</Callout>}
       <div className="record-grid">

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { api, setToken, getToken, setAuthExpiredHandler } from './api.js';
 import Login from './Login.jsx';
-import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState } from './components.jsx';
+import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState, ReminderModal } from './components.jsx';
 import {
   money, money0, fmtDate, ymLabel, curYM, addMonths, nameOf, findById, toCSV, download,
   CATEGORIES, ROLES, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES, LIFECYCLE_STAGES
@@ -3789,25 +3789,12 @@ function DunningPage({ db, setView, notify, actingRole }) {
     finally { setBusy(''); }
   };
 
-  /* Step 1 — open the popup with the mail text. NOTHING is sent or logged yet. */
+  /* Open the review popup — NOTHING is sent or logged until Confirm inside it. */
   const openPreview = async (r) => {
     setBusy(r.invoiceId);
     try {
       const p = await api.dunning.preview(r.invoiceId);
-      setMailPreview({ ...p, invoiceId: r.invoiceId, mode: 'preview' });
-    } catch (e) { notify(e.message, true); }
-    finally { setBusy(''); }
-  };
-  /* Step 2 — only on the confirm click inside the popup. */
-  const confirmSend = async () => {
-    setBusy('send');
-    try {
-      const res = await api.dunning.remind(mailPreview.invoiceId);
-      setMailPreview({ ...res, mode: 'sent' });
-      notify(res.channel === 'email'
-        ? `Stage-${res.stage} reminder e-mailed to ${res.toEmail}.`
-        : `Stage-${res.stage} reminder recorded — no SMTP/e-mail, copy the text to send manually.`);
-      await load();
+      setMailPreview({ ...p, invoiceId: r.invoiceId });
     } catch (e) { notify(e.message, true); }
     finally { setBusy(''); }
   };
@@ -3880,28 +3867,7 @@ function DunningPage({ db, setView, notify, actingRole }) {
           </table>
         )}
       </div>
-      {mailPreview && (
-        <Modal title={`Reminder — ${mailPreview.stageLabel} (stage ${mailPreview.stage})${mailPreview.mode === 'preview' ? ' — review before sending' : ''}`} onClose={() => setMailPreview(null)}
-          footer={mailPreview.mode === 'preview' ? <>
-            <button className="btn btn-ghost" onClick={() => setMailPreview(null)}>Cancel</button>
-            <button className="btn btn-ghost" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(`Subject: ${mailPreview.subject}\n\n${mailPreview.body}`).then(() => notify('Copied to clipboard.')); }}>Copy text</button>
-            <button className="btn btn-teal" disabled={busy === 'send'} onClick={confirmSend}>
-              {busy === 'send' ? 'Sending…' : mailPreview.willEmail ? `✉ Confirm & e-mail to ${mailPreview.toEmail}` : 'Confirm & record (no e-mail)'}
-            </button>
-          </> : <>
-            <button className="btn btn-ghost" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(`Subject: ${mailPreview.subject}\n\n${mailPreview.body}`).then(() => notify('Copied to clipboard.')); }}>Copy text</button>
-            <button className="btn btn-teal" onClick={() => setMailPreview(null)}>Done</button>
-          </>}>
-          {mailPreview.mode === 'preview' && <Callout>Nothing has been sent yet — this is the exact mail. {mailPreview.willEmail
-            ? <>On confirm it is e-mailed to <b>{mailPreview.toEmail}</b>{mailPreview.cc ? <> (cc {mailPreview.cc})</> : null}{mailPreview.attachInvoice ? ', with the invoice statement attached,' : ''} and logged.</>
-            : <>{mailPreview.toEmail ? 'SMTP is not configured' : 'This brand has no billing email'} — on confirm it is logged and you can copy the text into Outlook.</>}
-            {mailPreview.dunningHold ? <> <b>Note:</b> auto-reminders are paused on this lease ({mailPreview.dunningHoldNote}) — sending now is a manual override.</> : null}</Callout>}
-          {mailPreview.mode === 'sent' && mailPreview.channel !== 'email' && <Callout warn>E-mail was not sent ({mailPreview.toEmail ? 'SMTP not configured' : 'brand has no billing email'}) — the reminder is logged; copy this text and send it from Outlook.</Callout>}
-          {mailPreview.mode === 'sent' && mailPreview.channel === 'email' && <Callout>Reminder e-mailed to <b>{mailPreview.toEmail}</b>{mailPreview.cc ? <> (cc {mailPreview.cc})</> : null} and logged.</Callout>}
-          <div className="field"><label>Subject</label><input readOnly value={mailPreview.subject} /></div>
-          <div className="field"><label>Body</label><textarea readOnly style={{ minHeight: 220, fontFamily: 'var(--mono)', fontSize: 12 }} value={mailPreview.body} /></div>
-        </Modal>
-      )}
+      {mailPreview && <ReminderModal preview={mailPreview} onClose={() => setMailPreview(null)} notify={notify} afterSent={load} />}
     </>
   );
 }

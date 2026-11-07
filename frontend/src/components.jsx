@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { api } from './api.js';
 
 export function Modal({ title, onClose, onSave, saveLabel = 'Save', wide, xwide, footer, children }) {
   useEffect(() => {
@@ -74,5 +75,56 @@ export function EmptyState({ thing, onAdd }) {
       <p>Create your first {thing} to get started.</p>
       {onAdd && <button className="btn btn-teal" onClick={onAdd}>Add {thing}</button>}
     </div>
+  );
+}
+
+/* ── Payment-reminder popup (shared by the Dunning page and the invoice record page).
+   preview: result of api.dunning.preview(invoiceId) + { invoiceId }.
+   Shows the exact mail; the To address is prefilled from the brand's billing
+   email and fully editable. NOTHING is sent or logged until Confirm is clicked. */
+export function ReminderModal({ preview, onClose, notify, afterSent }) {
+  const [to, setTo] = useState(preview.toEmail || '');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(null);
+  const willEmail = preview.mailerEnabled && to.trim();
+  const copy = () => {
+    navigator.clipboard && navigator.clipboard.writeText(`Subject: ${preview.subject}\n\n${preview.body}`)
+      .then(() => notify('Copied to clipboard.'));
+  };
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      const res = await api.dunning.remind(preview.invoiceId, to.trim() || undefined);
+      setSent(res);
+      notify(res.channel === 'email'
+        ? `Stage-${res.stage} reminder e-mailed to ${res.toEmail}.`
+        : `Stage-${res.stage} reminder recorded — no SMTP/e-mail, copy the text to send manually.`);
+      afterSent && (await afterSent());
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Reminder — ${preview.stageLabel} (stage ${preview.stage})${sent ? '' : ' — review before sending'}`} onClose={onClose}
+      footer={sent ? <>
+        <button className="btn btn-ghost" onClick={copy}>Copy text</button>
+        <button className="btn btn-teal" onClick={onClose}>Done</button>
+      </> : <>
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-ghost" onClick={copy}>Copy text</button>
+        <button className="btn btn-teal" disabled={busy} onClick={confirm}>
+          {busy ? 'Sending…' : willEmail ? `✉ Confirm & e-mail` : 'Confirm & record (no e-mail)'}
+        </button>
+      </>}>
+      {!sent && <Callout>Nothing has been sent yet — this is the exact mail. {willEmail
+        ? <>On confirm it is e-mailed to the address below{preview.cc ? <> (cc {preview.cc})</> : null}{preview.attachInvoice ? ', with the invoice statement attached,' : ''} and logged.</>
+        : <>{preview.mailerEnabled ? 'Enter an e-mail address to send, or confirm to record only' : 'SMTP is not configured — on confirm it is logged and you can copy the text into Outlook'}.</>}
+        {preview.dunningHold ? <> <b>Note:</b> auto-reminders are paused on this lease ({preview.dunningHoldNote}) — sending now is a manual override.</> : null}</Callout>}
+      {sent && sent.channel !== 'email' && <Callout warn>E-mail was not sent ({to.trim() ? 'SMTP not configured' : 'no e-mail address'}) — the reminder is logged; copy this text and send it from Outlook.</Callout>}
+      {sent && sent.channel === 'email' && <Callout>Reminder e-mailed to <b>{sent.toEmail}</b>{sent.cc ? <> (cc {sent.cc})</> : null} and logged.</Callout>}
+      <div className="field"><label>To (e-mail){preview.toEmail ? ' — prefilled from Brand Master, edit if needed' : ' — no billing email saved for this brand, type one'}</label>
+        <input type="email" placeholder="accounts@tenant.com" value={to} disabled={!!sent} onChange={(e) => setTo(e.target.value)} /></div>
+      <div className="field"><label>Subject</label><input readOnly value={preview.subject} /></div>
+      <div className="field"><label>Body</label><textarea readOnly style={{ minHeight: 200, fontFamily: 'var(--mono)', fontSize: 12 }} value={preview.body} /></div>
+    </Modal>
   );
 }

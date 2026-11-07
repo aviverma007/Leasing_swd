@@ -173,12 +173,15 @@ async function logReminder(pool, invoiceId, stage, channel, toEmail, note, by) {
     .query(`INSERT INTO ${SCHEMA}.DunningLog (Id,InvoiceId,Stage,Channel,ToEmail,Note,SentBy) VALUES (@id,@inv,@st,@ch,@to,@n,@by)`);
 }
 
-/* Send/record one reminder (shared by the sweep and the manual route). */
-async function sendReminder(pool, row, st, cfg, by) {
+/* Send/record one reminder (shared by the sweep and the manual route).
+   toOverride: an address typed/edited in the send popup — used instead of the
+   brand's saved billing email for this one send. */
+async function sendReminder(pool, row, st, cfg, by, toOverride) {
   const mailer = require('./mailer');
+  const to = (toOverride || row.BrandEmail || '').trim() || null;
   const { subject, body } = mailText(row, st, cfg);
   let channel = 'in-app', mailResult = null;
-  if (mailer.enabled() && row.BrandEmail) {
+  if (mailer.enabled() && to) {
     try {
       const attachments = [];
       if (cfg.attachInvoice) {
@@ -186,15 +189,15 @@ async function sendReminder(pool, row, st, cfg, by) {
         if (att) attachments.push(att);
       }
       mailResult = await mailer.sendMail({
-        to: row.BrandEmail, cc: cfg.cc || undefined, subject,
+        to, cc: cfg.cc || undefined, subject,
         html: body.replace(/\n/g, '<br>'),
         attachments: attachments.length ? attachments : undefined
       });
       if (mailResult && mailResult.sent) channel = 'email';
     } catch (e) { mailResult = { error: e.message }; }
   }
-  await logReminder(pool, row.Id, st.stage, channel, row.BrandEmail, subject, by || 'system');
-  return { subject, body, channel, mailResult };
+  await logReminder(pool, row.Id, st.stage, channel, to, subject, by || 'system');
+  return { subject, body, channel, mailResult, toEmail: to };
 }
 
 /* Internal escalation — mailed to the CC list / BILLING_EMAILS when tenants hit FINAL NOTICE. */
