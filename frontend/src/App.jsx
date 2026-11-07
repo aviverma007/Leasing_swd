@@ -3789,11 +3789,21 @@ function DunningPage({ db, setView, notify, actingRole }) {
     finally { setBusy(''); }
   };
 
-  const remind = async (r) => {
+  /* Step 1 — open the popup with the mail text. NOTHING is sent or logged yet. */
+  const openPreview = async (r) => {
     setBusy(r.invoiceId);
     try {
-      const res = await api.dunning.remind(r.invoiceId);
-      setMailPreview(res);
+      const p = await api.dunning.preview(r.invoiceId);
+      setMailPreview({ ...p, invoiceId: r.invoiceId, mode: 'preview' });
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+  /* Step 2 — only on the confirm click inside the popup. */
+  const confirmSend = async () => {
+    setBusy('send');
+    try {
+      const res = await api.dunning.remind(mailPreview.invoiceId);
+      setMailPreview({ ...res, mode: 'sent' });
       notify(res.channel === 'email'
         ? `Stage-${res.stage} reminder e-mailed to ${res.toEmail}.`
         : `Stage-${res.stage} reminder recorded — no SMTP/e-mail, copy the text to send manually.`);
@@ -3810,8 +3820,10 @@ function DunningPage({ db, setView, notify, actingRole }) {
   return (
     <>
       <Callout>Reminder ladder: <b>Stage 1</b> at 1–{(data.config?.stage2From || 8) - 1} days overdue · <b>Stage 2</b> at {data.config?.stage2From || 8}–{(data.config?.stage3From || 16) - 1} · <b>Stage 3</b> at {data.config?.stage3From || 16}–{(data.config?.stage4From || 31) - 1} · <b>Stage 4 (final notice)</b> from day {data.config?.stage4From || 31}.
-        The scheduler records each stage automatically once a day{data.mailerEnabled ? ' and e-mails the brand’s billing address.' : '. E-mail is OFF (no SMTP configured) — reminders are logged here and the text can be copied to send manually.'}
-        {' '}Set the brand’s <b>billing email</b> in Brand Master for automatic sending.
+        {data.config?.autoSend
+          ? <> The scheduler sends each stage automatically once a day{data.mailerEnabled ? ' to the brand’s billing address.' : ' (logged only — no SMTP configured yet).'}</>
+          : <> <b>Nothing is sent automatically</b> — due reminders wait here; click <b>Send reminder</b>, review the popup and confirm.</>}
+        {' '}Set the brand’s <b>billing email</b> in Brand Master so confirmed reminders can be e-mailed.
         {canSend && <> <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => setShowCfg((v) => !v)}>⚙ Settings</button></>}</Callout>
       {showCfg && cfg && (
         <div className="card" style={{ marginTop: 12, padding: 16 }}>
@@ -3832,6 +3844,7 @@ function DunningPage({ db, setView, notify, actingRole }) {
           <div className="field" style={{ marginTop: 8 }}><label>CC every reminder to (team addresses, comma-separated)</label>
             <input placeholder="leasing@smartworlddevelopers.com, finance@smartworlddevelopers.com" value={cfg.cc} onChange={(e) => setCfg({ ...cfg, cc: e.target.value })} /></div>
           <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 10 }}>
+            <label className="chk"><input type="checkbox" checked={!!cfg.autoSend} onChange={(e) => setCfg({ ...cfg, autoSend: e.target.checked })} /> <b>Send automatically</b> (daily sweep mails each stage without asking — OFF: everything waits for your confirm popup)</label>
             <label className="chk"><input type="checkbox" checked={!!cfg.escalate} onChange={(e) => setCfg({ ...cfg, escalate: e.target.checked })} /> Internal escalation mail when tenants hit FINAL NOTICE</label>
             <label className="chk"><input type="checkbox" checked={!!cfg.attachInvoice} onChange={(e) => setCfg({ ...cfg, attachInvoice: e.target.checked })} /> Attach invoice statement to the reminder</label>
             <label className="chk"><input type="checkbox" checked={!!cfg.weeklySummary} onChange={(e) => setCfg({ ...cfg, weeklySummary: e.target.checked })} /> Monday overdue summary to the team</label>
@@ -3857,8 +3870,8 @@ function DunningPage({ db, setView, notify, actingRole }) {
                   <td>{stagePill(r.stage)}</td>
                   <td className="sub">{r.remindersSent ? `${r.remindersSent} sent · last ${new Date(r.lastReminderAt).toLocaleDateString('en-GB')}` : 'none yet'}</td>
                   <td className="rowact" onClick={(e) => e.stopPropagation()}>
-                    {canSend && <button className="btn btn-teal btn-sm" disabled={busy === r.invoiceId} onClick={() => remind(r)}>
-                      {busy === r.invoiceId ? 'Sending…' : data.mailerEnabled && r.brandEmail ? '✉ Send reminder' : 'Record + get text'}
+                    {canSend && <button className="btn btn-teal btn-sm" disabled={busy === r.invoiceId} onClick={() => openPreview(r)}>
+                      {busy === r.invoiceId ? 'Opening…' : '✉ Send reminder…'}
                     </button>}
                   </td>
                 </tr>
@@ -3868,12 +3881,23 @@ function DunningPage({ db, setView, notify, actingRole }) {
         )}
       </div>
       {mailPreview && (
-        <Modal title={`Reminder — ${mailPreview.stageLabel} (stage ${mailPreview.stage})`} onClose={() => setMailPreview(null)}
-          footer={<>
+        <Modal title={`Reminder — ${mailPreview.stageLabel} (stage ${mailPreview.stage})${mailPreview.mode === 'preview' ? ' — review before sending' : ''}`} onClose={() => setMailPreview(null)}
+          footer={mailPreview.mode === 'preview' ? <>
+            <button className="btn btn-ghost" onClick={() => setMailPreview(null)}>Cancel</button>
+            <button className="btn btn-ghost" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(`Subject: ${mailPreview.subject}\n\n${mailPreview.body}`).then(() => notify('Copied to clipboard.')); }}>Copy text</button>
+            <button className="btn btn-teal" disabled={busy === 'send'} onClick={confirmSend}>
+              {busy === 'send' ? 'Sending…' : mailPreview.willEmail ? `✉ Confirm & e-mail to ${mailPreview.toEmail}` : 'Confirm & record (no e-mail)'}
+            </button>
+          </> : <>
             <button className="btn btn-ghost" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(`Subject: ${mailPreview.subject}\n\n${mailPreview.body}`).then(() => notify('Copied to clipboard.')); }}>Copy text</button>
             <button className="btn btn-teal" onClick={() => setMailPreview(null)}>Done</button>
           </>}>
-          {mailPreview.channel !== 'email' && <Callout warn>E-mail was not sent ({mailPreview.toEmail ? 'SMTP not configured' : 'brand has no billing email'}) — the reminder is logged; copy this text and send it from Outlook.</Callout>}
+          {mailPreview.mode === 'preview' && <Callout>Nothing has been sent yet — this is the exact mail. {mailPreview.willEmail
+            ? <>On confirm it is e-mailed to <b>{mailPreview.toEmail}</b>{mailPreview.cc ? <> (cc {mailPreview.cc})</> : null}{mailPreview.attachInvoice ? ', with the invoice statement attached,' : ''} and logged.</>
+            : <>{mailPreview.toEmail ? 'SMTP is not configured' : 'This brand has no billing email'} — on confirm it is logged and you can copy the text into Outlook.</>}
+            {mailPreview.dunningHold ? <> <b>Note:</b> auto-reminders are paused on this lease ({mailPreview.dunningHoldNote}) — sending now is a manual override.</> : null}</Callout>}
+          {mailPreview.mode === 'sent' && mailPreview.channel !== 'email' && <Callout warn>E-mail was not sent ({mailPreview.toEmail ? 'SMTP not configured' : 'brand has no billing email'}) — the reminder is logged; copy this text and send it from Outlook.</Callout>}
+          {mailPreview.mode === 'sent' && mailPreview.channel === 'email' && <Callout>Reminder e-mailed to <b>{mailPreview.toEmail}</b>{mailPreview.cc ? <> (cc {mailPreview.cc})</> : null} and logged.</Callout>}
           <div className="field"><label>Subject</label><input readOnly value={mailPreview.subject} /></div>
           <div className="field"><label>Body</label><textarea readOnly style={{ minHeight: 220, fontFamily: 'var(--mono)', fontSize: 12 }} value={mailPreview.body} /></div>
         </Modal>

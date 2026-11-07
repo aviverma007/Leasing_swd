@@ -136,6 +136,7 @@ export const api = {
   dunning: {
     list: () => req('GET', '/dunning'),
     log: (invoiceId) => req('GET', `/dunning/${invoiceId}/log`),
+    preview: (invoiceId) => req('GET', `/dunning/${invoiceId}/preview`),
     remind: (invoiceId) => req('POST', `/dunning/${invoiceId}/remind`),
     config: () => req('GET', '/dunning/config'),
     saveConfig: (body) => req('PUT', '/dunning/config', body)

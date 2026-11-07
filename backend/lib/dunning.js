@@ -11,6 +11,8 @@ const { sql, SCHEMA } = require('../db');
 const { uid } = require('./helpers');
 
 const DEFAULT_CONFIG = {
+  autoSend: false,        // OFF: the daily sweep only flags what is due — nothing is sent
+                          // without a person clicking Send on the Dunning page (popup confirm)
   stage2From: 8,          // stage 1 always starts at day 1
   stage3From: 16,
   stage4From: 31,
@@ -40,6 +42,7 @@ async function saveConfig(pool, cfg) {
     throw new Error('Stage days must increase: stage 2 < stage 3 < stage 4.');
   }
   const ist = Number(cfg.interestFromStage); if ([1, 2, 3, 4].includes(ist)) clean.interestFromStage = ist;
+  clean.autoSend = cfg.autoSend === true || cfg.autoSend === 'true';
   clean.cc = String(cfg.cc || '').split(/[;,]/).map((s) => s.trim()).filter((s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)).join(',');
   clean.escalate = cfg.escalate !== false && cfg.escalate !== 'false';
   clean.attachInvoice = cfg.attachInvoice !== false && cfg.attachInvoice !== 'false';
@@ -215,9 +218,15 @@ async function escalateFinalNotices(pool, cfg, rows) {
 }
 
 /* Daily sweep: send/log the reminder for any invoice that has crossed a new stage.
+   Runs ONLY when auto-send is enabled in the dunning settings — by default it is
+   off and reminders wait on the Dunning page for a manual, confirmed send.
    Leases with DunningHold=1 are skipped (dispute / negotiation hold). */
 async function runDunning(pool) {
   const cfg = await getConfig(pool);
+  if (!cfg.autoSend) {
+    console.log('[dunning] auto-send is OFF — due reminders are flagged on the Dunning page for manual send');
+    return 0;
+  }
   const rows = await overdueRows(pool);
   let sent = 0; const finals = [];
   for (const row of rows) {

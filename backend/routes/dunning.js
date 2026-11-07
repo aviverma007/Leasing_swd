@@ -8,7 +8,7 @@
         returns the mail text so it can be copied/pasted even without SMTP. */
 const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
-const { getConfig, saveConfig, stagesFor, stageFor, overdueRows, sendReminder } = require('../lib/dunning');
+const { getConfig, saveConfig, stagesFor, stageFor, overdueRows, sendReminder, mailText } = require('../lib/dunning');
 const { logAudit, userName } = require('../lib/audit');
 const router = express.Router();
 
@@ -53,6 +53,28 @@ router.put('/config', async (req, res) => {
       userName(req));
     res.json(saved);
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/* Preview the reminder BEFORE sending — nothing is sent or logged here.
+   The UI shows this in a popup; only a confirmed click calls /remind. */
+router.get('/:invoiceId/preview', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const cfg = await getConfig(pool);
+    const rows = await overdueRows(pool);
+    const row = rows.find(r => r.Id === req.params.invoiceId);
+    if (!row) return res.status(404).json({ error: 'Invoice is not overdue (or not found/approved).' });
+    const st = stageFor(row.DaysOverdue, cfg) || stagesFor(cfg)[0];
+    const { subject, body } = mailText(row, st, cfg);
+    res.json({
+      stage: st.stage, stageLabel: st.label,
+      toEmail: row.BrandEmail || null, cc: cfg.cc || null,
+      subject, body,
+      willEmail: require('../lib/mailer').enabled() && !!row.BrandEmail,
+      attachInvoice: !!cfg.attachInvoice,
+      dunningHold: !!row.DunningHold, dunningHoldNote: row.DunningHoldNote || ''
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/:invoiceId/log', async (req, res) => {
