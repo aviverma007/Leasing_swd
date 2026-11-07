@@ -1,23 +1,28 @@
 /* Dunning routes — the collections team's reminder ladder.
-   GET  /api/dunning                 → every overdue approved invoice with stage, balance, reminders sent
+   GET  /api/dunning                 → every overdue approved invoice with stage, balance, reminders sent + config
+   GET  /api/dunning/config          → current dunning settings
+   PUT  /api/dunning/config          → save settings (stage days, interest stage, CC, toggles)
    GET  /api/dunning/:invoiceId/log  → reminder history for one invoice
-   POST /api/dunning/:invoiceId/remind → send/record the current-stage reminder now (manual);
+   POST /api/dunning/:invoiceId/remind → send/record the current-stage reminder now (manual;
+        works even when the lease is on dunning hold — that is the override);
         returns the mail text so it can be copied/pasted even without SMTP. */
 const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
-const { STAGES, stageFor, mailText, overdueRows, logReminder } = require('../lib/dunning');
+const { getConfig, saveConfig, stagesFor, stageFor, overdueRows, sendReminder } = require('../lib/dunning');
 const { logAudit, userName } = require('../lib/audit');
 const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
     const pool = await getPool();
+    const cfg = await getConfig(pool);
     const rows = await overdueRows(pool);
     res.json({
-      stages: STAGES,
+      stages: stagesFor(cfg),
+      config: cfg,
       mailerEnabled: require('../lib/mailer').enabled(),
       rows: rows.map(r => {
-        const st = stageFor(r.DaysOverdue);
+        const st = stageFor(r.DaysOverdue, cfg);
         return {
           invoiceId: r.Id, no: r.No, type: r.Type, ym: r.Ym,
           brandName: r.BrandName, brandEmail: r.BrandEmail || null, unitName: r.UnitName,
@@ -26,11 +31,28 @@ router.get('/', async (req, res) => {
           daysOverdue: r.DaysOverdue,
           stage: st ? st.stage : 0, stageLabel: st ? st.label : '—',
           remindersSent: r.RemindersSent, maxStageSent: r.MaxStage,
-          lastReminderAt: r.LastReminderAt ? new Date(r.LastReminderAt).toISOString() : null
+          lastReminderAt: r.LastReminderAt ? new Date(r.LastReminderAt).toISOString() : null,
+          dunningHold: !!r.DunningHold, dunningHoldNote: r.DunningHoldNote || ''
         };
       })
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/config', async (req, res) => {
+  try { res.json(await getConfig(await getPool())); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/config', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const saved = await saveConfig(pool, req.body || {});
+    await logAudit(pool, 'settings', 'dunning_config', 'edited',
+      `Dunning settings saved — stages 1/${saved.stage2From}/${saved.stage3From}/${saved.stage4From} days, interest from stage ${saved.interestFromStage}, CC: ${saved.cc || '—'}, escalation ${saved.escalate ? 'on' : 'off'}, attachment ${saved.attachInvoice ? 'on' : 'off'}, weekly summary ${saved.weeklySummary ? 'on' : 'off'}`,
+      userName(req));
+    res.json(saved);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 router.get('/:invoiceId/log', async (req, res) => {
@@ -45,23 +67,15 @@ router.get('/:invoiceId/log', async (req, res) => {
 router.post('/:invoiceId/remind', async (req, res) => {
   try {
     const pool = await getPool();
+    const cfg = await getConfig(pool);
     const rows = await overdueRows(pool);
     const row = rows.find(r => r.Id === req.params.invoiceId);
     if (!row) return res.status(404).json({ error: 'Invoice is not overdue (or not found/approved).' });
-    const st = stageFor(row.DaysOverdue) || STAGES[0];
-    const { subject, body } = mailText(row, st);
-    const mailer = require('../lib/mailer');
-    let channel = 'in-app', mailResult = null;
-    if (mailer.enabled() && row.BrandEmail) {
-      try {
-        mailResult = await mailer.sendMail({ to: row.BrandEmail, subject, html: body.replace(/\n/g, '<br>') });
-        if (mailResult && mailResult.sent) channel = 'email';
-      } catch (e) { mailResult = { error: e.message }; }
-    }
+    const st = stageFor(row.DaysOverdue, cfg) || stagesFor(cfg)[0];
     const by = userName(req);
-    await logReminder(pool, row.Id, st.stage, channel, row.BrandEmail, subject, by);
-    await logAudit(pool, 'invoices', row.Id, 'reminder', `Stage-${st.stage} ${st.label} ${channel === 'email' ? 'e-mailed to ' + row.BrandEmail : 'recorded (no SMTP/e-mail — copy the text below)'}`, by);
-    res.json({ stage: st.stage, stageLabel: st.label, channel, toEmail: row.BrandEmail, subject, body, mailResult });
+    const { subject, body, channel, mailResult } = await sendReminder(pool, row, st, cfg, by);
+    await logAudit(pool, 'invoices', row.Id, 'reminder', `Stage-${st.stage} ${st.label} ${channel === 'email' ? 'e-mailed to ' + row.BrandEmail + (cfg.cc ? ' (cc ' + cfg.cc + ')' : '') : 'recorded (no SMTP/e-mail — copy the text below)'}${row.DunningHold ? ' — sent manually while auto-reminders are paused' : ''}`, by);
+    res.json({ stage: st.stage, stageLabel: st.label, channel, toEmail: row.BrandEmail, cc: cfg.cc || null, subject, body, mailResult, dunningHold: !!row.DunningHold });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

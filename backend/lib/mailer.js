@@ -24,12 +24,13 @@ function getTransporter() {
   return transporter;
 }
 
-async function sendMail({ to, subject, html }) {
+async function sendMail({ to, cc, subject, html, attachments }) {
   const t = getTransporter();
   if (!t) return { skipped: true, reason: 'SMTP not configured (set SMTP_HOST in .env)' };
   const info = await t.sendMail({
     from: process.env.SMTP_FROM || 'Smart Leasing <noreply@smartworld.local>',
-    to, subject, html
+    to, cc: cc || undefined, subject, html,
+    attachments: attachments || undefined
   });
   return { sent: true, id: info.messageId };
 }

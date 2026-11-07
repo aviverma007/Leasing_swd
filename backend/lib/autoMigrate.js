@@ -23,6 +23,8 @@ const BASE_COLUMNS = [
   ['Leases', 'IgstApplicable', 'BIT NOT NULL DEFAULT 0'],
   ['Leases', 'PoolGroupId', 'NVARCHAR(40) NULL'],
   ['Leases', 'AlertsEnabled', 'BIT NOT NULL DEFAULT 1'],
+  ['Leases', 'DunningHold', 'BIT NOT NULL DEFAULT 0'],
+  ['Leases', 'DunningHoldNote', 'NVARCHAR(300) NULL'],
   // ── Collections: SD adjustment ──
   ['Collections', 'SdAdjAmt', 'DECIMAL(18,2) NOT NULL DEFAULT 0'],
   ['Collections', 'SdNote', 'NVARCHAR(300) NULL'],

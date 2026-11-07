@@ -90,6 +90,23 @@ function startScheduler(pool) {
         }
       }
     } catch (e) { console.error('[dunning] tick failed:', e.message); }
+    // v4.4 — weekly overdue summary to the team (Mondays, once per ISO week)
+    try {
+      if (process.env.DUNNING !== '0' && new Date().getDay() === 1) {
+        const now = new Date();
+        const jan1 = new Date(now.getFullYear(), 0, 1);
+        const week = Math.ceil(((now - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+        const weekKey = `dunning_week_${now.getFullYear()}-W${String(week).padStart(2, '0')}`;
+        const r = await pool.request().input('k', sql.NVarChar(100), weekKey)
+          .query(`SELECT COUNT(*) c FROM ${SCHEMA}.Settings WHERE SettingKey=@k`);
+        if (r.recordset[0].c === 0) {
+          await pool.request().input('id', sql.VarChar(40), uid()).input('k', sql.NVarChar(100), weekKey).input('v', sql.NVarChar(sql.MAX), '{}')
+            .query(`INSERT INTO ${SCHEMA}.Settings (Id, SettingKey, Value) VALUES (@id, @k, @v)`);
+          const res = await require('./dunning').runWeeklySummary(pool);
+          console.log(`[dunning] weekly summary: ${res && res.sent ? 'emailed' : (res && res.reason) || 'done'}`);
+        }
+      }
+    } catch (e) { console.error('[dunning] weekly summary failed:', e.message); }
   };
   setTimeout(tick, 20 * 1000); // first check shortly after boot
   setInterval(tick, CHECK_MS);

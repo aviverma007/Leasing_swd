@@ -65,7 +65,8 @@ export const api = {
     stageLog: (id) => req('GET', `/leases/${id}/stage-log`),
     setAlerts: (id, enabled) => req('POST', `/leases/${id}/alerts`, { enabled }),
     release: (id) => req('POST', `/leases/${id}/release`),
-    units: (id) => req('GET', `/leases/${id}/units`)
+    units: (id) => req('GET', `/leases/${id}/units`),
+    dunningHold: (id, hold, note) => req('POST', `/leases/${id}/dunning-hold`, { hold, note })
   },
   sales: crud('/sales'),
   invoices: {
@@ -135,7 +136,9 @@ export const api = {
   dunning: {
     list: () => req('GET', '/dunning'),
     log: (invoiceId) => req('GET', `/dunning/${invoiceId}/log`),
-    remind: (invoiceId) => req('POST', `/dunning/${invoiceId}/remind`)
+    remind: (invoiceId) => req('POST', `/dunning/${invoiceId}/remind`),
+    config: () => req('GET', '/dunning/config'),
+    saveConfig: (body) => req('PUT', '/dunning/config', body)
   },
   deletionRequests: {
     list: (status) => req('GET', '/deletion-requests' + (status ? `?status=${status}` : '')),

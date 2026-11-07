@@ -3769,9 +3769,25 @@ function DunningPage({ db, setView, notify, actingRole }) {
   const [data, setData] = React.useState(null);
   const [busy, setBusy] = React.useState('');
   const [mailPreview, setMailPreview] = React.useState(null);
+  const [showCfg, setShowCfg] = React.useState(false);
+  const [cfg, setCfg] = React.useState(null);
   const canSend = canEdit(actingRole, 'collections');
-  const load = async () => { try { setData(await api.dunning.list()); } catch (e) { notify(e.message, true); } };
+  const load = async () => {
+    try { const d = await api.dunning.list(); setData(d); setCfg((c) => c || d.config); }
+    catch (e) { notify(e.message, true); }
+  };
   useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const saveCfg = async () => {
+    setBusy('cfg');
+    try {
+      const saved = await api.dunning.saveConfig(cfg);
+      setCfg(saved); setShowCfg(false);
+      notify('Dunning settings saved — the next sweep uses them.');
+      await load();
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
 
   const remind = async (r) => {
     setBusy(r.invoiceId);
@@ -3793,9 +3809,39 @@ function DunningPage({ db, setView, notify, actingRole }) {
   if (!data) return <div className="empty"><p>Loading overdue invoices…</p></div>;
   return (
     <>
-      <Callout>Reminder ladder: <b>Stage 1</b> at 1–7 days overdue · <b>Stage 2</b> at 8–15 · <b>Stage 3</b> at 16–30 · <b>Stage 4 (final notice)</b> beyond 30.
+      <Callout>Reminder ladder: <b>Stage 1</b> at 1–{(data.config?.stage2From || 8) - 1} days overdue · <b>Stage 2</b> at {data.config?.stage2From || 8}–{(data.config?.stage3From || 16) - 1} · <b>Stage 3</b> at {data.config?.stage3From || 16}–{(data.config?.stage4From || 31) - 1} · <b>Stage 4 (final notice)</b> from day {data.config?.stage4From || 31}.
         The scheduler records each stage automatically once a day{data.mailerEnabled ? ' and e-mails the brand’s billing address.' : '. E-mail is OFF (no SMTP configured) — reminders are logged here and the text can be copied to send manually.'}
-        {' '}Set the brand’s <b>billing email</b> in Brand Master for automatic sending.</Callout>
+        {' '}Set the brand’s <b>billing email</b> in Brand Master for automatic sending.
+        {canSend && <> <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => setShowCfg((v) => !v)}>⚙ Settings</button></>}</Callout>
+      {showCfg && cfg && (
+        <div className="card" style={{ marginTop: 12, padding: 16 }}>
+          <h3 style={{ margin: '0 0 10px' }}>Dunning settings</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            <div className="field" style={{ maxWidth: 140 }}><label>Stage 2 from (days)</label>
+              <input type="number" min="2" value={cfg.stage2From} onChange={(e) => setCfg({ ...cfg, stage2From: e.target.value })} /></div>
+            <div className="field" style={{ maxWidth: 140 }}><label>Stage 3 from (days)</label>
+              <input type="number" min="3" value={cfg.stage3From} onChange={(e) => setCfg({ ...cfg, stage3From: e.target.value })} /></div>
+            <div className="field" style={{ maxWidth: 160 }}><label>Final notice from (days)</label>
+              <input type="number" min="4" value={cfg.stage4From} onChange={(e) => setCfg({ ...cfg, stage4From: e.target.value })} /></div>
+            <div className="field" style={{ maxWidth: 200 }}><label>Mention interest from</label>
+              <select value={cfg.interestFromStage} onChange={(e) => setCfg({ ...cfg, interestFromStage: Number(e.target.value) })}>
+                <option value={1}>Stage 1 (first reminder)</option><option value={2}>Stage 2</option>
+                <option value={3}>Stage 3 (firm)</option><option value={4}>Stage 4 (final notice)</option>
+              </select></div>
+          </div>
+          <div className="field" style={{ marginTop: 8 }}><label>CC every reminder to (team addresses, comma-separated)</label>
+            <input placeholder="leasing@smartworlddevelopers.com, finance@smartworlddevelopers.com" value={cfg.cc} onChange={(e) => setCfg({ ...cfg, cc: e.target.value })} /></div>
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 10 }}>
+            <label className="chk"><input type="checkbox" checked={!!cfg.escalate} onChange={(e) => setCfg({ ...cfg, escalate: e.target.checked })} /> Internal escalation mail when tenants hit FINAL NOTICE</label>
+            <label className="chk"><input type="checkbox" checked={!!cfg.attachInvoice} onChange={(e) => setCfg({ ...cfg, attachInvoice: e.target.checked })} /> Attach invoice statement to the reminder</label>
+            <label className="chk"><input type="checkbox" checked={!!cfg.weeklySummary} onChange={(e) => setCfg({ ...cfg, weeklySummary: e.target.checked })} /> Monday overdue summary to the team</label>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+            <button className="btn btn-teal" disabled={busy === 'cfg'} onClick={saveCfg}>{busy === 'cfg' ? 'Saving…' : 'Save settings'}</button>
+            <button className="btn btn-ghost" onClick={() => { setCfg(data.config); setShowCfg(false); }}>Cancel</button>
+          </div>
+        </div>
+      )}
       <div className="tablewrap" style={{ marginTop: 14 }}>
         {data.rows.length === 0 ? <EmptyMini text="🎉 Nothing overdue — no reminders needed." /> : (
           <table>
@@ -3804,7 +3850,7 @@ function DunningPage({ db, setView, notify, actingRole }) {
               {data.rows.map((r) => (
                 <tr key={r.invoiceId} className="rowlink" onClick={() => setView('invoices', r.invoiceId)}>
                   <td><span className="code">{r.no}</span><div className="sub">{r.type} · {ymLabel(r.ym)}</div></td>
-                  <td>{r.brandName}<div className="sub">{r.unitName}{r.brandEmail ? ' · ' + r.brandEmail : ' · no email set'}</div></td>
+                  <td>{r.brandName}{r.dunningHold && <Pill color="grey" title={r.dunningHoldNote}>⏸ Paused</Pill>}<div className="sub">{r.unitName}{r.brandEmail ? ' · ' + r.brandEmail : ' · no email set'}{r.dunningHold ? ' · auto-reminders paused: ' + (r.dunningHoldNote || '') : ''}</div></td>
                   <td className="sub">{fmtDate(r.dueDate)}</td>
                   <td className="num strong">{money0(r.balance)}</td>
                   <td className="num" style={{ color: r.daysOverdue > 30 ? 'var(--red)' : 'var(--amber)' }}>{r.daysOverdue}</td>

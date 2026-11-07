@@ -62,8 +62,8 @@ export function Callout({ children, warn }) {
   );
 }
 
-export function Pill({ color, children }) {
-  return <span className={`pill ${color}`}>{children}</span>;
+export function Pill({ color, children, title }) {
+  return <span className={`pill ${color}`} title={title}>{children}</span>;
 }
 
 export function EmptyState({ thing, onAdd }) {

@@ -227,8 +227,23 @@ function LeaseRecordPage({ id, db, go, setModal, refresh, notify, actingRole }) 
     <RecordShell go={go}
       crumbs={[{ label: 'Leasing', view: 'leases' }, { label: 'Leases', view: 'leases' }, { label: l.code }]}
       title={`${l.code} — ${brand?.name || '—'}`}
-      pills={<><DocStatusPill st={l.docStatus} /><Pill color="teal">{l.lifecycleStage || 'Active'}</Pill>{l.onHold && <Pill color="amber">On hold</Pill>}{l.negotiationMode && <Pill color="violet">MG under negotiation · {l.negotiationMode}</Pill>}</>}
+      pills={<><DocStatusPill st={l.docStatus} /><Pill color="teal">{l.lifecycleStage || 'Active'}</Pill>{l.onHold && <Pill color="amber">On hold</Pill>}{l.dunningHold && <Pill color="grey" title={l.dunningHoldNote}>⏸ Reminders paused</Pill>}{l.negotiationMode && <Pill color="violet">MG under negotiation · {l.negotiationMode}</Pill>}</>}
       actions={edit && <>
+        <button className="btn btn-ghost btn-sm" onClick={async () => {
+          try {
+            if (l.dunningHold) {
+              await api.leases.dunningHold(id, false);
+              notify('Payment reminders resumed for this lease.');
+            } else {
+              const note = window.prompt('Pause payment reminders — why? (e.g. "under negotiation", "amount disputed")');
+              if (note == null) return;
+              if (!note.trim()) return notify('A note is mandatory to pause reminders.', true);
+              await api.leases.dunningHold(id, true, note.trim());
+              notify('Payment reminders paused — the daily sweep will skip this lease (manual reminders still work).');
+            }
+            await refresh(['leases']);
+          } catch (e) { notify(e.message, true); }
+        }}>{l.dunningHold ? '▶ Resume reminders' : '⏸ Pause reminders'}</button>
         <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'leaseStage', id })}>Stage</button>
         {!['Exited', 'Renewed'].includes(l.lifecycleStage) && <>
           <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'renewLease', id })}>Renew</button>

@@ -57,6 +57,7 @@ function mapLease(r) {
     cam: Number(r.Cam), utility: Number(r.Utility), esc: Number(r.Esc), deposit: Number(r.Deposit),
     gst: Number(r.Gst), onHold: !!r.OnHold, holdRemarks: r.HoldRemarks, status: r.Status,
     alertsEnabled: r.AlertsEnabled == null ? true : !!r.AlertsEnabled,
+    dunningHold: !!r.DunningHold, dunningHoldNote: r.DunningHoldNote || '',
     lifecycleStage: r.LifecycleStage || 'Active',
     docStatus: r.DocStatus || 'Approved', submittedBy: r.SubmittedBy || null,
     approvedBy: r.ApprovedBy || null,
@@ -179,6 +180,24 @@ router.post('/:id/hold', async (req, res) => {
     await pool.request().input('id', sql.VarChar(40), req.params.id).input('ref', sql.NVarChar(100), req.params.id)
       .query(`INSERT INTO ${SCHEMA}.ChangeLog (Id, LogDate, Type, Ref, Detail, ByUser) VALUES (NEWID(), CAST(GETDATE() AS DATE), 'Lease hold', @ref, @ref, 'System')`);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Pause / resume payment reminders for this lease (dispute or negotiation hold).
+   The daily dunning sweep skips held leases; manual reminders still work. */
+router.post('/:id/dunning-hold', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const hold = !!req.body.hold;
+    const note = String(req.body.note || '').trim();
+    if (hold && !note) return res.status(400).json({ error: 'A note is mandatory when pausing reminders (e.g. "under negotiation", "disputed").' });
+    await pool.request().input('id', sql.VarChar(40), req.params.id)
+      .input('h', sql.Bit, hold ? 1 : 0).input('n', sql.NVarChar(300), hold ? note : null)
+      .query(`UPDATE ${SCHEMA}.Leases SET DunningHold=@h, DunningHoldNote=@n WHERE Id=@id`);
+    const { logAudit, userName } = require('../lib/audit');
+    await logAudit(pool, 'leases', req.params.id, hold ? 'dunning-paused' : 'dunning-resumed',
+      hold ? `Payment reminders paused — ${note}` : 'Payment reminders resumed', userName(req));
+    res.json({ ok: true, dunningHold: hold, dunningHoldNote: hold ? note : '' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -343,7 +362,7 @@ router.post('/:id/renew', async (req, res) => {
       JOIN sys.schemas sc ON sc.schema_id=t.schema_id
       WHERE sc.name='${SCHEMA}' AND t.name='Leases'`);
     const skip = new Set(['Id', 'Code', 'StartDate', 'EndDate', 'Mg', 'LifecycleStage', 'RenewedToId', 'ExitDate', 'OnHold', 'HoldRemarks', 'Status',
-      'DocStatus', 'SubmittedBy', 'SubmittedAt', 'ApprovedBy', 'ApprovedAt', 'RejectReason', 'CreatedBy', 'CreatedAt']);
+      'DocStatus', 'SubmittedBy', 'SubmittedAt', 'ApprovedBy', 'ApprovedAt', 'RejectReason', 'CreatedBy', 'CreatedAt', 'DunningHold', 'DunningHoldNote']);
     const copyCols = colsR.recordset.map(c => c.name).filter(n => !skip.has(n));
     const colList = copyCols.map(c => `[${c}]`).join(',');
 
