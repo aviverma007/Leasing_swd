@@ -29,9 +29,16 @@ router.get('/', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 300, 2000);
     const reqq = pool.request();
     const where = [];
-    if (user) { reqq.input('u', sql.NVarChar(150), user); where.push('ByUser = @u'); }
-    if (type) { reqq.input('t', sql.VarChar(30), type); where.push('EntityType = @t'); }
-    if (action) { reqq.input('a', sql.VarChar(30), action); where.push('Action = @a'); }
+    /* user/type/action accept one value or a comma-separated list (multi-select filters) */
+    const multi = (val, col, prefix, sqlType) => {
+      const vals = String(val).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
+      if (!vals.length) return;
+      const names = vals.map((v, i) => { reqq.input(prefix + i, sqlType, v); return '@' + prefix + i; });
+      where.push(`${col} IN (${names.join(',')})`);
+    };
+    if (user) multi(user, 'ByUser', 'u', sql.NVarChar(150));
+    if (type) multi(type, 'EntityType', 't', sql.VarChar(30));
+    if (action) multi(action, 'Action', 'a', sql.VarChar(30));
     if (from) { reqq.input('f', sql.Date, from); where.push('At >= @f'); }
     if (to) { reqq.input('e', sql.Date, to); where.push('At < DATEADD(day, 1, @e)'); }
     if (q) { reqq.input('q', sql.NVarChar(200), '%' + String(q).replace(/[%_\[]/g, c => '[' + c + ']') + '%'); where.push('(Detail LIKE @q OR EntityId LIKE @q)'); }

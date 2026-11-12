@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { api, setToken, getToken, setAuthExpiredHandler } from './api.js';
 import Login from './Login.jsx';
-import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState, ReminderModal } from './components.jsx';
+import { Modal, ConfirmModal, Toast, Callout, Pill, EmptyState, ReminderModal, MultiFilt } from './components.jsx';
 import {
   money, money0, fmtDate, ymLabel, curYM, addMonths, nameOf, findById, toCSV, download,
   CATEGORIES, ROLES, MASTER_SCHEMA, RENTAL_TYPES, RENTAL_HINT, NAV, PAGES, LIFECYCLE_STAGES
@@ -1128,13 +1128,15 @@ function UnitStatusPill({ s }) {
 function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.leases) || []);
   const [pageSize, setPageSize] = useState(20);
-  const [fStage, setFStage] = useState('');
-  const [fType, setFType] = useState('');
-  const [fAppr, setFAppr] = useState('');
+  const [fStage, setFStage] = useState([]);
+  const [fType, setFType] = useState([]);
+  const [fAppr, setFAppr] = useState([]);
+  const [fBrand, setFBrand] = useState([]);
   let rows = db.leases.filter((l) => !search || [nameOf(db.brands, l.brandId), nameOf(db.units, l.unitId), l.code].join(' ').toLowerCase().includes(search.toLowerCase()));
-  if (fStage) rows = rows.filter((l) => (l.lifecycleStage || 'Active') === fStage);
-  if (fType) rows = rows.filter((l) => l.rentalType === fType);
-  if (fAppr) rows = rows.filter((l) => (l.docStatus || 'Approved') === fAppr);
+  if (fStage.length) rows = rows.filter((l) => fStage.includes(l.lifecycleStage || 'Active'));
+  if (fType.length) rows = rows.filter((l) => fType.includes(l.rentalType));
+  if (fAppr.length) rows = rows.filter((l) => fAppr.includes(l.docStatus || 'Approved'));
+  if (fBrand.length) rows = rows.filter((l) => fBrand.includes(l.brandId));
   const totalRows = rows.length;
   rows = rows.slice(0, pageSize);
   const release = async (id) => {
@@ -1146,18 +1148,11 @@ function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify,
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
       <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
         <SearchBox placeholder="Search leases, brands, units…" value={search} onChange={setSearch} />
-        <select className="filt" value={fType} onChange={(e) => setFType(e.target.value)}>
-          <option value="">All types</option>
-          {RENTAL_TYPES.map(([v]) => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select className="filt" value={fStage} onChange={(e) => setFStage(e.target.value)}>
-          <option value="">All stages</option>
-          {LIFECYCLE_STAGES.map((s) => <option key={s}>{s}</option>)}
-        </select>
-        <select className="filt" value={fAppr} onChange={(e) => setFAppr(e.target.value)}>
-          <option value="">Any approval</option>
-          {['Pending', 'Approved', 'Rejected'].map((s) => <option key={s}>{s}</option>)}
-        </select>
+        <MultiFilt label="All brands" values={fBrand} onChange={setFBrand}
+          options={[...db.brands].sort((a, b) => a.name.localeCompare(b.name)).map((b) => [b.id, b.name])} />
+        <MultiFilt label="All types" values={fType} onChange={setFType} options={RENTAL_TYPES.map(([v]) => v)} />
+        <MultiFilt label="All stages" values={fStage} onChange={setFStage} options={LIFECYCLE_STAGES} />
+        <MultiFilt label="Any approval" values={fAppr} onChange={setFAppr} options={['Pending', 'Approved', 'Rejected']} />
         <ListMeta shown={totalRows} total={db.leases.length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       <div className="tablewrap">
@@ -1931,10 +1926,15 @@ function SalesFormModal({ db, onClose, refresh, notify }) {
 function InvoicesPage({ db, search, setSearch, setView, filterVal, setFilterVal, setModal, notify, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.invoices) || []);
   const [pageSize, setPageSize] = useState(20);
-  const [fAppr, setFAppr] = useState('');
+  const [fAppr, setFAppr] = useState([]);
+  const [fBrand, setFBrand] = useState([]);
+  const [fStatus, setFStatus] = useState([]);
   let rows = db.invoices.filter((i) => !search || [i.no, i.type, nameOf(db.brands, i.brandId), nameOf(db.units, i.unitId)].join(' ').toLowerCase().includes(search.toLowerCase()));
-  if (filterVal) rows = rows.filter((i) => i.type === filterVal);
-  if (fAppr) rows = rows.filter((i) => (i.docStatus || 'Approved') === fAppr);
+  const fTypes = Array.isArray(filterVal) ? filterVal : (filterVal ? [filterVal] : []);
+  if (fTypes.length) rows = rows.filter((i) => fTypes.includes(i.type));
+  if (fAppr.length) rows = rows.filter((i) => fAppr.includes(i.docStatus || 'Approved'));
+  if (fBrand.length) rows = rows.filter((i) => fBrand.includes(i.brandId));
+  if (fStatus.length) rows = rows.filter((i) => fStatus.includes(i.status));
   rows = [...rows].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
   const totalRows = rows.length;
   rows = rows.slice(0, pageSize);
@@ -1943,13 +1943,11 @@ function InvoicesPage({ db, search, setSearch, setView, filterVal, setFilterVal,
     <>
       <div className="toolbar">
         <SearchBox placeholder="Search invoices…" value={search} onChange={setSearch} />
-        <select className="filt" value={filterVal} onChange={(e) => setFilterVal(e.target.value)}>
-          {['', 'MG', 'RevShare', 'CAM', 'Utility', 'Adhoc'].map((t) => <option key={t} value={t}>{t || 'All types'}</option>)}
-        </select>
-        <select className="filt" value={fAppr} onChange={(e) => setFAppr(e.target.value)}>
-          <option value="">Any approval</option>
-          {['Pending', 'Approved', 'Rejected'].map((s) => <option key={s}>{s}</option>)}
-        </select>
+        <MultiFilt label="All brands" values={fBrand} onChange={setFBrand}
+          options={[...db.brands].sort((a, b) => a.name.localeCompare(b.name)).map((b) => [b.id, b.name])} />
+        <MultiFilt label="All types" values={fTypes} onChange={setFilterVal} options={['MG', 'RevShare', 'CAM', 'Utility', 'Adhoc']} />
+        <MultiFilt label="Any status" values={fStatus} onChange={setFStatus} options={['Unpaid', 'Partial', 'Paid']} />
+        <MultiFilt label="Any approval" values={fAppr} onChange={setFAppr} options={['Pending', 'Approved', 'Rejected']} />
         <ListMeta shown={totalRows} total={db.invoices.length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       <div className="tablewrap">
@@ -2675,12 +2673,14 @@ function CollectionMasterPage({ db, search, setSearch }) {
 function CollectionsPage({ db, search, setSearch, setView, setModal, canEditView, pendingDel }) {
   const pendingIds = new Set((pendingDel && pendingDel.collections) || []);
   const [pageSize, setPageSize] = useState(20);
-  const [fAppr, setFAppr] = useState('');
+  const [fAppr, setFAppr] = useState([]);
+  const [fMode, setFMode] = useState([]);
   let rows = db.collections.filter((c) => {
     const inv = findById(db.invoices, c.invoiceId);
     return !search || [c.no, inv?.no, c.ref].join(' ').toLowerCase().includes(search.toLowerCase());
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
-  if (fAppr) rows = rows.filter((c) => (c.docStatus || 'Approved') === fAppr);
+  if (fAppr.length) rows = rows.filter((c) => fAppr.includes(c.docStatus || 'Approved'));
+  if (fMode.length) rows = rows.filter((c) => fMode.includes(c.instrument || 'NEFT'));
   const totalRows = rows.length;
   rows = rows.slice(0, pageSize);
 
@@ -2689,10 +2689,8 @@ function CollectionsPage({ db, search, setSearch, setView, setModal, canEditView
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
       <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
         <SearchBox placeholder="Search collections…" value={search} onChange={setSearch} />
-        <select className="filt" value={fAppr} onChange={(e) => setFAppr(e.target.value)}>
-          <option value="">Any approval</option>
-          {['Pending', 'Approved', 'Rejected'].map((s) => <option key={s}>{s}</option>)}
-        </select>
+        <MultiFilt label="Any instrument" values={fMode} onChange={setFMode} options={['NEFT', 'Cheque']} />
+        <MultiFilt label="Any approval" values={fAppr} onChange={setFAppr} options={['Pending', 'Approved', 'Rejected']} />
         <ListMeta shown={totalRows} total={db.collections.length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       <div className="tablewrap">
@@ -3696,7 +3694,7 @@ function SdReconPage({ notify }) {
 const AUDIT_VIEW = { leases: 'leases', invoices: 'invoices', collections: 'collections', creditnotes: 'creditnotes', companies: 'companies', assets: 'assets', blocks: 'blocks', units: 'units', brands: 'brands', customers: 'customers', brokers: 'brokers', users: 'users' };
 function AuditLogPage({ setView, notify }) {
   const [meta, setMeta] = React.useState({ users: [], types: [], actions: [] });
-  const [f, setF] = React.useState({ user: '', type: '', action: '', from: '', to: '', q: '', limit: 300 });
+  const [f, setF] = React.useState({ user: [], type: [], action: [], from: '', to: '', q: '', limit: 300 });
   const [rows, setRows] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const load = async (filters) => {
@@ -3721,18 +3719,9 @@ function AuditLogPage({ setView, notify }) {
     <>
       <Callout>Every recorded action in the system — who signed in, who created/edited/deleted what (field by field), every approval, rejection, stage move, receipt, bounce and reminder. Logs are written automatically and cannot be edited from the application.</Callout>
       <div className="toolbar" style={{ marginTop: 14, flexWrap: 'wrap' }}>
-        <select className="filt" style={{ maxWidth: 230 }} value={f.user} onChange={(e) => setFilter('user', e.target.value)}>
-          <option value="">All users</option>
-          {meta.users.map((u) => <option key={u}>{u}</option>)}
-        </select>
-        <select className="filt" style={{ maxWidth: 180 }} value={f.type} onChange={(e) => setFilter('type', e.target.value)}>
-          <option value="">All record types</option>
-          {meta.types.map((t) => <option key={t}>{t}</option>)}
-        </select>
-        <select className="filt" style={{ maxWidth: 160 }} value={f.action} onChange={(e) => setFilter('action', e.target.value)}>
-          <option value="">All actions</option>
-          {meta.actions.map((a) => <option key={a}>{a}</option>)}
-        </select>
+        <MultiFilt label="All users" width={230} values={f.user} onChange={(v) => setFilter('user', v)} options={meta.users} />
+        <MultiFilt label="All record types" width={180} values={f.type} onChange={(v) => setFilter('type', v)} options={meta.types} />
+        <MultiFilt label="All actions" width={160} values={f.action} onChange={(v) => setFilter('action', v)} options={meta.actions} />
         <input type="date" className="filt" style={{ maxWidth: 160 }} value={f.from} onChange={(e) => setFilter('from', e.target.value)} title="From date" />
         <input type="date" className="filt" style={{ maxWidth: 160 }} value={f.to} onChange={(e) => setFilter('to', e.target.value)} title="To date" />
         <SearchBox placeholder="Search detail / record id…" value={f.q} onChange={(v) => setFilter('q', v)} />

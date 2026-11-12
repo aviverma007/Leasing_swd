@@ -129,7 +129,9 @@ export const api = {
   audit: {
     meta: () => req('GET', '/audit/meta'),
     list: (f) => {
-      const qs = Object.entries(f || {}).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+      const qs = Object.entries(f || {})
+        .filter(([, v]) => (Array.isArray(v) ? v.length : v))
+        .map(([k, v]) => `${k}=${encodeURIComponent(Array.isArray(v) ? v.join(',') : v)}`).join('&');
       return req('GET', '/audit' + (qs ? '?' + qs : ''));
     }
   },

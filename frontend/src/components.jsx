@@ -130,3 +130,42 @@ export function ReminderModal({ preview, onClose, notify, afterSent }) {
     </Modal>
   );
 }
+
+/* ── MultiFilt: multi-select filter dropdown (checkbox list) used on every list page.
+   values: array of selected option values; empty array = no filter (= "All"). */
+export function MultiFilt({ label, options, values, onChange, width }) {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const opts = (options || []).map((o) => (Array.isArray(o) ? o : [o, o]));
+  const toggle = (v) => onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
+  const labelFor = (v) => { const f = opts.find(([ov]) => ov === v); return f ? f[1] : v; };
+  const text = values.length === 0 ? label
+    : values.length <= 2 ? values.map(labelFor).join(', ')
+    : `${label.replace(/^All /i, '')}: ${values.length} selected`;
+  return (
+    <div className="mfilt" ref={ref} style={width ? { width } : undefined}>
+      <button type="button" className={`mfilt-btn ${values.length ? 'has' : ''}`} onClick={() => setOpen((o) => !o)}>
+        <span className="mfilt-txt">{text}</span>
+        <svg viewBox="0 0 24 24" width="12" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className="mfilt-pop">
+          <div className="mfilt-head"><span>{label}</span>{values.length > 0 && <a onClick={() => onChange([])}>Clear ({values.length})</a>}</div>
+          <div className="mfilt-list">
+            {opts.map(([v, l]) => (
+              <label key={v} className="mfilt-opt">
+                <input type="checkbox" checked={values.includes(v)} onChange={() => toggle(v)} />
+                <span>{l}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
