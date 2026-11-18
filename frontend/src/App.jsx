@@ -28,6 +28,8 @@ function parseHash() {
 
 export default function App() {
   const [authUser, setAuthUser] = useState(null); // null = not logged in
+  // Tell the IT Manager usage tracker (index.html) who is signed in, so usage shows real people
+  useEffect(() => { window.ITM_USER = authUser ? (authUser.username || authUser.name || '') : ''; }, [authUser]);
   const [db, setDb] = useState(EMPTY_DB);
   const [pendingDel, setPendingDel] = useState({}); // entity -> [recordIds] with pending deletion
   const [loading, setLoading] = useState(true);
