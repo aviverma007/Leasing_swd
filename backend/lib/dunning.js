@@ -107,10 +107,13 @@ async function invoiceAttachment(pool, invoiceId) {
     const r = await pool.request().input('i', sql.VarChar(40), invoiceId).query(`
       SELECT i.No, i.Type, i.Ym, i.InvDate, i.DueDate, i.Descr, i.Amount, i.CgstAmt, i.SgstAmt, i.IgstAmt, i.Total, i.HsnCode,
         b.Name AS BrandName, b.Gstin AS BrandGstin, u.Name AS UnitName, l.Code AS LeaseCode,
+        COALESCE(NULLIF(l.LessorName,''), a.LandlordName) AS LessorName,
+        COALESCE(NULLIF(l.LessorGstin,''), a.Gstin) AS LessorGstin,
         ISNULL(c.paid,0) AS Paid, ISNULL(cn.credited,0) AS Credited
       FROM ${SCHEMA}.Invoices i
       JOIN ${SCHEMA}.Brands b ON b.Id=i.BrandId
       JOIN ${SCHEMA}.Units u ON u.Id=i.UnitId
+      LEFT JOIN ${SCHEMA}.Assets a ON a.Id=u.AssetId
       LEFT JOIN ${SCHEMA}.Leases l ON l.Id=i.LeaseId
       OUTER APPLY (SELECT SUM(Amount) paid FROM ${SCHEMA}.Collections WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') c
       OUTER APPLY (SELECT SUM(CASE WHEN NoteType='Credit' THEN Total ELSE -Total END) credited FROM ${SCHEMA}.CreditNotes WHERE InvoiceId=i.Id AND ISNULL(DocStatus,'Approved')='Approved') cn
@@ -123,8 +126,8 @@ async function invoiceAttachment(pool, invoiceId) {
     const row = (k, v, b) => `<tr><td style="padding:6px 10px;color:#64718a">${k}</td><td style="padding:6px 10px;text-align:right;${b ? 'font-weight:bold' : ''}">${v}</td></tr>`;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${x.No}</title></head>
 <body style="font-family:Arial,sans-serif;color:#1c2538;max-width:640px;margin:24px auto">
-<h2 style="color:#0f1a30;margin-bottom:2px">Smart World Developers — Invoice statement</h2>
-<p style="color:#64718a;margin-top:0">Invoice <b>${x.No}</b> · ${x.Type} · ${x.Ym} · Lease ${x.LeaseCode || '—'}</p>
+<h2 style="color:#0f1a30;margin-bottom:2px">${x.LessorName || 'Smart World Developers'} — Invoice statement</h2>
+<p style="color:#64718a;margin-top:0">${x.LessorGstin ? 'GSTIN ' + x.LessorGstin + ' · ' : ''}Invoice <b>${x.No}</b> · ${x.Type} · ${x.Ym} · Lease ${x.LeaseCode || '—'}</p>
 <table style="border-collapse:collapse;width:100%;border:1px solid #dfe5ee">
 ${row('Tenant', `${x.BrandName}${x.BrandGstin ? ' · GSTIN ' + x.BrandGstin : ''}`)}
 ${row('Unit', x.UnitName)}
