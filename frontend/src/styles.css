@@ -698,3 +698,12 @@ tbody tr{transition:background .12s}
 .mfilt-opt input{flex:0 0 auto;width:14px;height:14px;margin:0}
 .mfilt-opt:hover{background:#F4F7FB}
 .mfilt-opt input{accent-color:var(--teal)}
+
+/* ── v4.6: import center ── */
+.imp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:14px}
+.imp-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;transition:border-color .12s, box-shadow .12s}
+.imp-card:hover{border-color:var(--teal);box-shadow:0 4px 14px rgba(14,148,136,.08)}
+.imp-card.sel{border-color:var(--teal);background:#F0FBFA;box-shadow:0 0 0 1px var(--teal) inset}
+.imp-card h4{margin:8px 0 4px;font-size:14px}
+.imp-card p{margin:0;font-size:11.5px;color:var(--muted);line-height:1.45}
+.imp-ico{font-size:20px}

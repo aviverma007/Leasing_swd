@@ -59,6 +59,7 @@ app.use('/api/wf', require('./routes/workflow'));
 app.use('/api', require('./routes/activity')); // /api/activity/:type/:id + /api/comments/:type/:id
 app.use('/api/search', require('./routes/search'));
 app.use('/api/dunning', requireModule('collections'), require('./routes/dunning'));
+app.use('/api/import', require('./routes/importer')); // per-type edit permission enforced inside
 app.use('/api/audit', requireModule('users'), require('./routes/auditlog'));
 app.use('/api/stats', require('./routes/stats'));
 

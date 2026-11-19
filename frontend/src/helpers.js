@@ -224,6 +224,7 @@ export const NAV = [
   { v: 'sdrecon', label: 'SD Reconciliation' },
   { v: 'camtrueup', label: 'CAM True-up' },
   { grp: 'Admin' },
+  { v: 'importcenter', label: 'Import Center (Excel)' },
   { v: 'deletions', label: 'Pending Deletions' },
   { v: 'roleprofiles', label: 'Role Profiles' },
   { v: 'auditlog', label: 'Audit Logs' }
@@ -261,5 +262,6 @@ export const PAGES = {
   camtrueup: { t: 'CAM True-up', s: 'Year-end reconciliation — budgeted CAM billed vs actual cost per sq ft' },
   deletions: { t: 'Pending Deletions', s: 'Approve or reject deletion requests raised by users' },
   roleprofiles: { t: 'Role Profiles', s: 'Define what each role can view or edit — Admin always has full access' },
-  auditlog: { t: 'Audit Logs', s: 'Every action by every user — logins, creations, edits, deletions, approvals, reminders' }
+  auditlog: { t: 'Audit Logs', s: 'Every action by every user — logins, creations, edits, deletions, approvals, reminders' },
+  importcenter: { t: 'Import Center', s: 'Bulk-upload Excel for units, brands, leases, sales, receipts & more — validate first, import only clean rows' }
 };

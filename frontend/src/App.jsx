@@ -357,6 +357,7 @@ function ViewRouter(props) {
   if (view === 'camtrueup') return <CamTrueupPage {...props} />;
   if (view === 'dunning') return <DunningPage {...props} />;
   if (view === 'auditlog') return <AuditLogPage {...props} />;
+  if (view === 'importcenter') return <ImportCenterPage {...props} />;
   return null;
 }
 
@@ -3694,6 +3695,160 @@ function SdReconPage({ notify }) {
 
 /* ── Audit Logs: every action by every user, filterable ── */
 const AUDIT_VIEW = { leases: 'leases', invoices: 'invoices', collections: 'collections', creditnotes: 'creditnotes', companies: 'companies', assets: 'assets', blocks: 'blocks', units: 'units', brands: 'brands', customers: 'customers', brokers: 'brokers', users: 'users' };
+/* ── Import Center: bulk Excel upload for every data type ───────────────
+   Pattern for each type: download template → fill → upload → the server
+   validates every row (nothing saved) → review green/red rows → Import.
+   Imported leases/receipts/investor-units land as Pending (maker–checker). */
+const IMPORT_TYPES = [
+  { key: 'sales', icon: '📈', title: 'Monthly Sales', module: 'sales', refresh: ['sales', 'invoices'],
+    desc: 'Rev-share brands\' monthly sales — updates existing months, creates missing ones, re-syncs the RS invoice.',
+    headers: ['Lease Code*', 'Month (YYYY-MM)*', 'Sales Amount*'],
+    sample: ['LSE-0047', '2026-10', 5400000] },
+  { key: 'collections', icon: '🧾', title: 'Receipts (Collections)', module: 'collections', refresh: ['collections', 'invoices'],
+    desc: 'Bank receipts against invoices — land as Pending for checker approval. Duplicate UTR/cheque refs are rejected.',
+    headers: ['Invoice No*', 'Date (YYYY-MM-DD)*', 'Amount*', 'TDS %', 'Instrument (NEFT/Cheque)', 'Reference (UTR/Cheque No)'],
+    sample: ['INV-0112', '2026-11-15', 43937.51, 10, 'NEFT', 'UTR9988776655'] },
+  { key: 'units', icon: '🏬', title: 'Units', module: 'units', refresh: ['units'],
+    desc: 'New units with areas and card rate. Existing unit names are rejected (edit those in Unit Master).',
+    headers: ['Unit Name*', 'Asset', 'Block', 'Floor', 'Builtup Area (sqft)', 'Carpet Area (sqft)', 'Card Rate (Rs/sqft)', 'Unit Type', 'Owner', 'Status'],
+    sample: ['G-21', 'Gems-2 Commercial, Sec-89', '', 0, 1131.64, 905.31, 145, 'Retail', '', 'Vacant'] },
+  { key: 'brands', icon: '🏷️', title: 'Brands (Tenants)', module: 'brands', refresh: ['brands'],
+    desc: 'New tenant brands with billing e-mail (used by payment reminders), GSTIN and PAN — both are format-checked.',
+    headers: ['Brand Name*', 'Category', 'Billing Email', 'GSTIN', 'PAN', 'Address'],
+    sample: ['Blue Tokai', 'F&B', 'accounts@bluetokai.com', '06AABCU9603R1ZV', 'AABCU9603R', 'Gurugram'] },
+  { key: 'brokers', icon: '🤝', title: 'Brokers', module: 'brands', refresh: ['brokers'],
+    desc: 'Channel partners for lease sourcing.',
+    headers: ['Broker Name*', 'Firm', 'Phone', 'Email', 'PAN', 'RERA No'],
+    sample: ['Rahul Khanna', 'RK Realty', '98100 00000', 'rahul@rkrealty.in', 'AAAPK1234K', ''] },
+  { key: 'customers', icon: '👤', title: 'Customers (Unit Owners)', module: 'units', refresh: ['customers'],
+    desc: 'Unit owners / customers master.',
+    headers: ['Customer Name*', 'Type', 'Phone', 'Email', 'PAN', 'GSTIN', 'Address', 'NRI (Yes/No)'],
+    sample: ['Juhi Nagar', 'Individual', '98100 11111', 'juhi@gmail.com', 'AAAPN1111A', '', 'Delhi', 'No'] },
+  { key: 'leases', icon: '📜', title: 'Leases', module: 'leases', refresh: ['leases', 'units'],
+    desc: 'Core commercial terms per lease — brand & unit must exist first. Imported leases are Pending until a checker approves; open each to add deed dates, parties and documents.',
+    headers: ['Brand Name*', 'Unit Name*', 'Start Date*', 'End Date*', 'Rental Type', 'MG', 'MG Basis (PerSqFt/Lumpsum)', 'Rev Share %', 'CAM (Rs/sqft)', 'Utility (Rs/sqft)', 'Escalation %', 'Deposit', 'GST %', 'Lock-in Months', 'Rent Start Date (optional)'],
+    sample: ['Blue Tokai', 'K-06', '2026-04-01', '2029-03-31', 'MG', 129.78, 'PerSqFt', '', 20, 0, 5, 111706, 18, 36, '2026-04-15'] },
+  { key: 'investorunits', icon: '💼', title: 'Investor Units', module: 'investors', refresh: ['investorUnits'],
+    desc: 'One row per investor; rows with the same unit combine into one record — Disburse % per unit must total 100. Lands as Pending.',
+    headers: ['Unit Name*', 'Investor Name*', 'Area %', 'Disburse %*', 'NRI (Yes/No)', 'Bank', 'Account No', 'IFSC'],
+    sample: ['K-06', 'Juhi Nagar', 100, 100, 'No', 'HDFC Bank', '50100222333', 'HDFC0000123'] }
+];
+
+function ImportCenterPage({ db, notify, actingRole, refresh }) {
+  const [sel, setSel] = React.useState(null);
+  const [rows, setRows] = React.useState(null);
+  const [fileName, setFileName] = React.useState('');
+  const [result, setResult] = React.useState(null);
+  const [busy, setBusy] = React.useState('');
+  const fileRef = React.useRef(null);
+  const types = IMPORT_TYPES.filter((t) => canEdit(actingRole, t.module));
+
+  const downloadTemplate = (t) => {
+    const ws = XLSX.utils.aoa_to_sheet([t.headers, t.sample]);
+    ws['!cols'] = t.headers.map((h) => ({ wch: Math.max(14, h.length + 2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, t.title.slice(0, 31));
+    XLSX.writeFile(wb, `Import_${t.key}_template.xlsx`);
+    notify(`Template downloaded — fill it and upload. Columns marked * are mandatory; the sample row shows the format (delete it before importing).`);
+  };
+
+  const parseFile = async (t, file) => {
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      let data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      data = data.map((r) => {
+        const o = {};
+        Object.entries(r).forEach(([k, v]) => { o[k] = v instanceof Date ? v.toISOString().slice(0, 10) : v; });
+        return o;
+      });
+      if (!data.length) return notify('The file has no data rows under the header row.', true);
+      setRows(data); setFileName(file.name); setResult(null);
+      setBusy('validate');
+      const res = await api.importer.run(t.key, data, false, file.name);
+      setResult(res);
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); if (fileRef.current) fileRef.current.value = ''; }
+  };
+
+  const doImport = async () => {
+    setBusy('commit');
+    try {
+      const res = await api.importer.run(sel.key, rows, true, fileName);
+      setResult(res);
+      notify(`${res.counts.imported} ${sel.title.toLowerCase()} row(s) imported${res.counts.errors ? `, ${res.counts.errors} rejected` : ''}.`);
+      await refresh(sel.refresh);
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+
+  const stPill = (s) => s === 'ok' ? <Pill color="green">ready</Pill>
+    : s === 'imported' ? <Pill color="teal">imported ✓</Pill>
+    : s === 'skip' ? <Pill color="grey">blank</Pill> : <Pill color="red">error</Pill>;
+
+  return (
+    <>
+      <Callout>Bulk-upload data from Excel in three safe steps: <b>1.</b> download the template · <b>2.</b> fill &amp; upload — every row is checked and <b>nothing is saved yet</b> · <b>3.</b> review the green/red list and click Import — only clean rows go in. Leases, receipts and investor units still arrive as <b>Pending</b> for checker approval, and every import is recorded in Audit Logs.</Callout>
+      <div className="imp-grid">
+        {types.map((t) => (
+          <div key={t.key} className={`imp-card ${sel?.key === t.key ? 'sel' : ''}`} onClick={() => { setSel(t); setRows(null); setResult(null); }}>
+            <div className="imp-ico">{t.icon}</div>
+            <h4>{t.title}</h4>
+            <p>{t.desc}</p>
+          </div>
+        ))}
+      </div>
+      {sel && (
+        <div className="card" style={{ marginTop: 16, padding: 16 }}>
+          <h3 style={{ margin: '0 0 4px' }}>{sel.icon} Import {sel.title}</h3>
+          <div className="sub" style={{ marginBottom: 10 }}>Columns: {sel.headers.join(' · ')}</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn btn-ghost" onClick={() => downloadTemplate(sel)}>⬇ Download template</button>
+            <label className="btn btn-teal" style={{ cursor: 'pointer' }}>
+              {busy === 'validate' ? 'Checking…' : '⬆ Upload filled Excel'}
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+                onChange={(e) => e.target.files[0] && parseFile(sel, e.target.files[0])} />
+            </label>
+            {fileName && <span className="chip">{fileName}</span>}
+          </div>
+          {result && (
+            <>
+              <div style={{ display: 'flex', gap: 8, margin: '14px 0 8px', flexWrap: 'wrap' }}>
+                <span className="chip">{result.counts.total} rows</span>
+                {result.counts.imported > 0 && <Pill color="teal">{result.counts.imported} imported</Pill>}
+                {result.counts.ok > 0 && <Pill color="green">{result.counts.ok} ready</Pill>}
+                {result.counts.errors > 0 && <Pill color="red">{result.counts.errors} with errors</Pill>}
+                {result.counts.skipped > 0 && <Pill color="grey">{result.counts.skipped} blank</Pill>}
+                {!result.commit && result.counts.ok > 0 && (
+                  <button className="btn btn-teal btn-sm" disabled={busy === 'commit'} onClick={doImport}>
+                    {busy === 'commit' ? 'Importing…' : `Import ${result.counts.ok} valid row(s)`}
+                  </button>
+                )}
+              </div>
+              {!result.commit && result.counts.errors > 0 && <Callout warn>Rows marked red will be <b>skipped</b> — you can import the green rows now and re-upload a corrected file for the rest, or fix the file first.</Callout>}
+              <div className="tablewrap" style={{ marginTop: 8, maxHeight: 420, overflow: 'auto' }}>
+                <table>
+                  <thead><tr><th style={{ width: 70 }}>Excel row</th><th style={{ width: 110 }}>Status</th><th>Details</th></tr></thead>
+                  <tbody>
+                    {result.results.slice(0, 500).map((r) => (
+                      <tr key={r.row}>
+                        <td className="sub">#{r.row}</td>
+                        <td>{stPill(r.status)}</td>
+                        <td style={r.status === 'error' ? { color: 'var(--red)' } : undefined}>{r.code ? <><span className="code">{r.code}</span> · </> : null}{r.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {result.results.length > 500 && <div className="sub" style={{ padding: 8 }}>…and {result.results.length - 500} more rows.</div>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 function AuditLogPage({ setView, notify }) {
   const [meta, setMeta] = React.useState({ users: [], types: [], actions: [] });
   const [f, setF] = React.useState({ user: [], type: [], action: [], from: '', to: '', q: '', limit: 300 });

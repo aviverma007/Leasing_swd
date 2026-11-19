@@ -168,5 +168,8 @@ export const api = {
     add: (type, id, body) => req('POST', `/comments/${type}/${id}`, { body })
   },
   search: (q) => req('GET', `/search?q=${encodeURIComponent(q)}`),
-  stats: { workspace: () => req('GET', '/stats/workspace') }
+  stats: { workspace: () => req('GET', '/stats/workspace') },
+  importer: {
+    run: (type, rows, commit, fileName) => req('POST', `/import/${type}`, { rows, commit, fileName })
+  }
 };
