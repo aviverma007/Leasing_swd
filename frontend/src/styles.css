@@ -728,3 +728,8 @@ tbody tr{transition:background .12s}
 .iem-item{display:flex;align-items:center;gap:9px;padding:7px 14px;font-size:13px;color:var(--ink);cursor:pointer}
 .iem-item:hover{background:#F4F7FB;color:var(--teal)}
 .iem-ico{width:16px;text-align:center}
+
+/* ── v4.9: report preview ── */
+.rc-prev th{white-space:nowrap;position:sticky;top:0;background:#fff;z-index:2}
+.rc-prev thead tr.filt-row th{top:34px;background:#FAFBFD}
+.rc-prev td{white-space:nowrap}

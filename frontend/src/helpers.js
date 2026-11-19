@@ -48,6 +48,7 @@ export const MASTER_SCHEMA = {
     sing: 'Project',
     fields: [
       { k: 'name', l: 'Asset name', req: 1, ph: 'Gems-2 Commercial, Sec-89' },
+      { k: 'companyId', l: 'Owning company (SPV)', ref: 'companies' },
       { k: 'city', l: 'City', ph: 'Gurugram' },
       { k: 'reraNo', l: 'RERA registration no', ph: 'RERA for GEMS-2 - 85 of 2024' },
       { k: 'ocStatus', l: 'OC status', type: 'select', opts: ['', 'OC Received', 'OC Applied', 'OC Pending'] },
@@ -61,8 +62,8 @@ export const MASTER_SCHEMA = {
       { k: 'bankIfsc', l: 'IFSC code', ph: 'HDFC0001234' },
       { k: 'bankMicr', l: 'MICR code', ph: '110240029' }
     ],
-    head: ['Code', 'Project', 'City', 'GSTIN'],
-    cols: (r) => [r.code, r.name, r.city || '—', r.gstin || '—']
+    head: ['Code', 'Project', 'Company', 'City', 'GSTIN'],
+    cols: (r, db) => [r.code, r.name, (db && (db.companies || []).find((c) => c.id === r.companyId)?.name) || '—', r.city || '—', r.gstin || '—']
   },
   blocks: {
     sing: 'Block',

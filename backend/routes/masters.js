@@ -14,9 +14,9 @@ const ENTITIES = {
   },
   assets: {
     table: 'Assets', prefix: 'AST',
-    cols: ['Name', 'City', 'ReraNo', 'OcStatus', 'LandlordName', 'LandlordAddress', 'Gstin', 'PanNo', 'BankName', 'BankBranch', 'BankAcc', 'BankIfsc', 'BankMicr'],
+    cols: ['Name', 'CompanyId', 'City', 'ReraNo', 'OcStatus', 'LandlordName', 'LandlordAddress', 'Gstin', 'PanNo', 'BankName', 'BankBranch', 'BankAcc', 'BankIfsc', 'BankMicr'],
     map: r => ({
-      id: r.Id, code: r.Code, name: r.Name, city: r.City, reraNo: r.ReraNo, ocStatus: r.OcStatus,
+      id: r.Id, code: r.Code, name: r.Name, companyId: r.CompanyId, city: r.City, reraNo: r.ReraNo, ocStatus: r.OcStatus,
       landlordName: r.LandlordName, landlordAddress: r.LandlordAddress,
       gstin: r.Gstin, panNo: r.PanNo,
       bankName: r.BankName, bankBranch: r.BankBranch, bankAcc: r.BankAcc, bankIfsc: r.BankIfsc, bankMicr: r.BankMicr

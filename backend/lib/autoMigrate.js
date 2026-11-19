@@ -31,6 +31,7 @@ const BASE_COLUMNS = [
   // ── Companies / Brands: tax identities ──
   ['Companies', 'PanNo', 'NVARCHAR(20) NULL'],
   ['Companies', 'Gstin', 'NVARCHAR(20) NULL'],
+  ['Assets', 'CompanyId', 'VARCHAR(40) NULL'],
   ['Brands', 'PanNo', 'NVARCHAR(20) NULL'],
   ['Brands', 'Gstin', 'NVARCHAR(20) NULL'],
   // ── Assets: landlord identity + bank + RERA ──

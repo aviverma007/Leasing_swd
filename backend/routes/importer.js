@@ -180,12 +180,15 @@ const TYPES = {
 
   assets: {
     module: 'assets', label: 'Project',
-    headers: ['Project Name*', 'City', 'RERA No', 'OC Status', 'Landlord Name', 'Landlord Address', 'GSTIN', 'PAN', 'Bank Name', 'Bank Branch', 'Bank Account', 'IFSC', 'MICR'],
-    sample: ['Gems-2 Commercial, Sec-89', 'Gurugram', 'RERA-GGM-0000-2026', 'Received', 'Adhikaansh Realtors Pvt. Ltd.', 'Sector 89, Gurugram', '06AABCA1234D1Z5', 'AABCA1234D', 'HDFC Bank', 'Sector 29', '50100222333', 'HDFC0000123', '110240001'],
-    notes: ['MANDATORY · New project name — must NOT already exist in Project Master', 'Optional · City', 'Optional · RERA registration number', 'Optional · e.g. Received / Applied', 'Optional · Landlord legal name (prints on invoices)', 'Optional · Landlord address', 'Optional · 15-character GSTIN', 'Optional · 10-character PAN', 'Optional · Bank for rent collection', 'Optional · Branch', 'Optional · Account number', 'Optional · IFSC (AAAA0XXXXXX)', 'Optional · MICR'],
+    headers: ['Project Name*', 'Owning Company', 'City', 'RERA No', 'OC Status', 'Landlord Name', 'Landlord Address', 'GSTIN', 'PAN', 'Bank Name', 'Bank Branch', 'Bank Account', 'IFSC', 'MICR'],
+    sample: ['Gems-2 Commercial, Sec-89', 'Adhikaansh Realtors Pvt. Ltd.', 'Gurugram', 'RERA-GGM-0000-2026', 'Received', 'Adhikaansh Realtors Pvt. Ltd.', 'Sector 89, Gurugram', '06AABCA1234D1Z5', 'AABCA1234D', 'HDFC Bank', 'Sector 29', '50100222333', 'HDFC0000123', '110240001'],
+    notes: ['MANDATORY · New project name — must NOT already exist in Project Master', 'Optional · Must EXACTLY match a Company name in Company Master — links the hierarchy Company → Project → Block → Unit', 'Optional · City', 'Optional · RERA registration number', 'Optional · e.g. Received / Applied', 'Optional · Landlord legal name (prints on invoices)', 'Optional · Landlord address', 'Optional · 15-character GSTIN', 'Optional · 10-character PAN', 'Optional · Bank for rent collection', 'Optional · Branch', 'Optional · Account number', 'Optional · IFSC (AAAA0XXXXXX)', 'Optional · MICR'],
     async ctx(pool) {
-      const a = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Assets`);
-      return { assets: makeLookup(a.recordset, 'Name'), seen: new Set() };
+      const [a, c] = await Promise.all([
+        pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Assets`),
+        pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Companies`)
+      ]);
+      return { assets: makeLookup(a.recordset, 'Name'), companies: makeLookup(c.recordset, 'Name'), seen: new Set() };
     },
     validate(ctx, row) {
       const name = norm(field(row, 'Project Name', 'Project', 'Asset', 'Name'));
@@ -198,8 +201,15 @@ const TYPES = {
       if (gstin && gstin.length !== 15) return { error: `GSTIN must be 15 characters (got ${gstin.length}).`, col: 'GSTIN' };
       const ifsc = norm(field(row, 'IFSC'));
       if (ifsc && !/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(ifsc)) return { error: `"${ifsc}" is not a valid IFSC.`, col: 'IFSC' };
+      const compName = norm(field(row, 'Owning Company', 'Company'));
+      let companyId = null;
+      if (compName) {
+        const co = ctx.companies.get(compName);
+        if (!co) { const sg = ctx.companies.suggest(compName); return { error: `Company "${compName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import companies first.'}`, col: 'Owning Company' }; }
+        companyId = co.Id;
+      }
       ctx.seen.add(low(name));
-      return { data: { name, city: norm(field(row, 'City')), rera: norm(field(row, 'RERA No', 'RERA')), oc: norm(field(row, 'OC Status')),
+      return { data: { name, companyId, city: norm(field(row, 'City')), rera: norm(field(row, 'RERA No', 'RERA')), oc: norm(field(row, 'OC Status')),
         lname: norm(field(row, 'Landlord Name')), laddr: norm(field(row, 'Landlord Address')), gstin, pan,
         bank: norm(field(row, 'Bank Name')), branch: norm(field(row, 'Bank Branch')), acc: norm(field(row, 'Bank Account', 'Account No')), ifsc, micr: norm(field(row, 'MICR')) },
         summary: `${name}${norm(field(row, 'City')) ? ' · ' + norm(field(row, 'City')) : ''}` };
@@ -207,14 +217,14 @@ const TYPES = {
     async commit(pool, d, by) {
       const id = uid(); const code = await nextNo(pool, sql, 'AST');
       await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
-        .input('n', sql.NVarChar(200), d.name).input('c', sql.NVarChar(100), d.city || null)
+        .input('n', sql.NVarChar(200), d.name).input('co', sql.VarChar(40), d.companyId).input('c', sql.NVarChar(100), d.city || null)
         .input('r', sql.NVarChar(80), d.rera || null).input('oc', sql.NVarChar(60), d.oc || null)
         .input('ln', sql.NVarChar(200), d.lname || null).input('la', sql.NVarChar(400), d.laddr || null)
         .input('g', sql.NVarChar(20), d.gstin || null).input('p', sql.NVarChar(20), d.pan || null)
         .input('bk', sql.NVarChar(120), d.bank || null).input('bb', sql.NVarChar(120), d.branch || null)
         .input('ac', sql.NVarChar(40), d.acc || null).input('if', sql.NVarChar(20), d.ifsc || null).input('mi', sql.NVarChar(20), d.micr || null)
-        .query(`INSERT INTO ${SCHEMA}.Assets (Id,Code,Name,City,ReraNo,OcStatus,LandlordName,LandlordAddress,Gstin,PanNo,BankName,BankBranch,BankAcc,BankIfsc,BankMicr)
-                VALUES (@id,@code,@n,@c,@r,@oc,@ln,@la,@g,@p,@bk,@bb,@ac,@if,@mi)`);
+        .query(`INSERT INTO ${SCHEMA}.Assets (Id,Code,Name,CompanyId,City,ReraNo,OcStatus,LandlordName,LandlordAddress,Gstin,PanNo,BankName,BankBranch,BankAcc,BankIfsc,BankMicr)
+                VALUES (@id,@code,@n,@co,@c,@r,@oc,@ln,@la,@g,@p,@bk,@bb,@ac,@if,@mi)`);
       await logAudit(pool, 'assets', id, 'created', `Project ${d.name} created (imported from Excel)`, by);
       return code;
     }

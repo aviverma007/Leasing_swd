@@ -1136,7 +1136,9 @@ function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify,
   const [fType, setFType] = useState([]);
   const [fAppr, setFAppr] = useState([]);
   const [fBrand, setFBrand] = useState([]);
+  const [fCompany, setFCompany] = useState([]);
   let rows = db.leases.filter((l) => !search || [nameOf(db.brands, l.brandId), nameOf(db.units, l.unitId), l.code].join(' ').toLowerCase().includes(search.toLowerCase()));
+  if (fCompany.length) rows = rows.filter((l) => { const b = findById(db.brands, l.brandId); return b && fCompany.includes(b.companyId); });
   if (fStage.length) rows = rows.filter((l) => fStage.includes(l.lifecycleStage || 'Active'));
   if (fType.length) rows = rows.filter((l) => fType.includes(l.rentalType));
   if (fAppr.length) rows = rows.filter((l) => fAppr.includes(l.docStatus || 'Approved'));
@@ -1152,8 +1154,10 @@ function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify,
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
       <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
         <SearchBox placeholder="Search leases, brands, units…" value={search} onChange={setSearch} />
+        <MultiFilt label="All companies" values={fCompany} onChange={setFCompany}
+          options={[...(db.companies || [])].sort((a, b) => a.name.localeCompare(b.name)).map((c) => [c.id, c.name])} />
         <MultiFilt label="All brands" values={fBrand} onChange={setFBrand}
-          options={[...db.brands].sort((a, b) => a.name.localeCompare(b.name)).map((b) => [b.id, b.name])} />
+          options={[...db.brands].filter((b) => !fCompany.length || fCompany.includes(b.companyId)).sort((a, b) => a.name.localeCompare(b.name)).map((b) => [b.id, b.name])} />
         <MultiFilt label="All types" values={fType} onChange={setFType} options={RENTAL_TYPES.map(([v]) => v)} />
         <MultiFilt label="All stages" values={fStage} onChange={setFStage} options={LIFECYCLE_STAGES} />
         <MultiFilt label="Any approval" values={fAppr} onChange={setFAppr} options={['Pending', 'Approved', 'Rejected']} />
@@ -4340,6 +4344,49 @@ function CamTrueupPage({ db, notify, actingRole, refresh }) {
 /* ── Report Center: every report as downloadable Excel (.xlsx) ── */
 function ReportCenterPage({ db, notify }) {
   const [busy, setBusy] = React.useState('');
+  /* on-screen preview (report viewer): date range + per-column filters + export of the filtered view */
+  const [prev, setPrev] = React.useState(null);        // { report, header, rows }
+  const [colF, setColF] = React.useState({});          // column filters: index -> text
+  const [dateCol, setDateCol] = React.useState(-1);
+  const [dFrom, setDFrom] = React.useState('');
+  const [dTo, setDTo] = React.useState('');
+
+  const openPreview = async (r) => {
+    setBusy('prev-' + r.key);
+    try {
+      const [header, rows] = r.async ? await r.build() : r.build();
+      const dc = header.findIndex((h) => /date|period|month|start|end/i.test(String(h)));
+      setPrev({ report: r, header, rows });
+      setColF({}); setDateCol(dc); setDFrom(''); setDTo('');
+      setTimeout(() => { const el = document.getElementById('rc-preview'); el && el.scrollIntoView({ behavior: 'smooth' }); }, 60);
+    } catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+  const parseCell = (v) => { const s = String(v ?? ''); const m = s.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?/); return m ? `${m[1]}-${m[2]}-${m[3] || '01'}` : null; };
+  const filteredRows = () => {
+    if (!prev) return [];
+    let rows = prev.rows;
+    if (dateCol >= 0 && (dFrom || dTo)) rows = rows.filter((row) => {
+      const d = parseCell(row[dateCol]);
+      if (!d) return false;
+      if (dFrom && d < dFrom) return false;
+      if (dTo && d > dTo) return false;
+      return true;
+    });
+    for (const [i, q] of Object.entries(colF)) {
+      if (!q) continue;
+      const needle = q.toLowerCase();
+      rows = rows.filter((row) => String(row[i] ?? '').toLowerCase().includes(needle));
+    }
+    return rows;
+  };
+  const exportPreview = (asCsv) => {
+    const rows = filteredRows();
+    const fname = prev.report.name.replace(/[^A-Za-z0-9]+/g, '_') + '_' + new Date().toISOString().slice(0, 10);
+    if (asCsv) { download(fname + '.csv', toCSV([prev.header, ...rows])); }
+    else { const wb = XLSX.utils.book_new(); aoaSheet(wb, prev.report.name, prev.header, rows); saveWb(wb, fname + '.xlsx'); }
+    notify(`Exported ${rows.length} filtered row(s).`);
+  };
 
   const aoaSheet = (wb, name, header, rows) => {
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
@@ -4484,12 +4531,62 @@ function ReportCenterPage({ db, notify }) {
           <div className="panel rc-card" key={r.key}>
             <div className="rc-name">{r.name}</div>
             <div className="sub rc-desc">{r.desc}</div>
-            <button className="btn btn-ghost btn-sm" onClick={() => downloadOne(r)} disabled={busy !== ''}>
-              {busy === r.key ? 'Building…' : '⬇ Excel (.xlsx)'}
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="btn btn-teal btn-sm" onClick={() => openPreview(r)} disabled={busy !== ''}>
+                {busy === 'prev-' + r.key ? 'Loading…' : '👁 Preview'}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => downloadOne(r)} disabled={busy !== ''}>
+                {busy === r.key ? 'Building…' : '⬇ Excel'}
+              </button>
+            </div>
           </div>
         ))}
       </div>
+
+      {prev && (() => {
+        const rows = filteredRows();
+        const activeFilters = Object.values(colF).filter(Boolean).length + ((dFrom || dTo) ? 1 : 0);
+        return (
+          <div className="panel" id="rc-preview" style={{ marginTop: 18 }}>
+            <div className="ph">
+              <h3>👁 {prev.report.name}</h3>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {dateCol >= 0 && <>
+                  <select className="filt" style={{ maxWidth: 160 }} value={dateCol} onChange={(e) => setDateCol(Number(e.target.value))} title="Date column for the range filter">
+                    {prev.header.map((h, i) => (/date|period|month|start|end/i.test(String(h)) ? <option key={i} value={i}>{h}</option> : null))}
+                  </select>
+                  <input type="date" className="filt" style={{ maxWidth: 150 }} value={dFrom} onChange={(e) => setDFrom(e.target.value)} title="From" />
+                  <input type="date" className="filt" style={{ maxWidth: 150 }} value={dTo} onChange={(e) => setDTo(e.target.value)} title="To" />
+                </>}
+                <span className="chip">{rows.length} of {prev.rows.length} rows{activeFilters ? ` · ${activeFilters} filter(s)` : ''}</span>
+                {activeFilters > 0 && <button className="btn btn-ghost btn-sm" onClick={() => { setColF({}); setDFrom(''); setDTo(''); }}>Clear filters</button>}
+                <button className="btn btn-ghost btn-sm" onClick={() => exportPreview(true)}>⬇ CSV</button>
+                <button className="btn btn-teal btn-sm" onClick={() => exportPreview(false)}>⬇ Excel (filtered)</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setPrev(null)}>✕ Close</button>
+              </div>
+            </div>
+            <div className="pb">
+              <div className="tablewrap" style={{ maxHeight: 480, overflow: 'auto' }}>
+                <table className="rc-prev">
+                  <thead>
+                    <tr>{prev.header.map((h, i) => <th key={i}>{h}</th>)}</tr>
+                    <tr className="filt-row">{prev.header.map((h, i) => (
+                      <th key={i}><input placeholder={String(h)} value={colF[i] || ''} onChange={(e) => setColF({ ...colF, [i]: e.target.value })} /></th>
+                    ))}</tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 300).map((row, ri) => (
+                      <tr key={ri}>{row.map((c, ci) => <td key={ci} className={typeof c === 'number' ? 'num' : undefined}>{typeof c === 'number' ? c.toLocaleString('en-IN') : String(c ?? '')}</td>)}</tr>
+                    ))}
+                  </tbody>
+                </table>
+                {rows.length > 300 && <div className="sub" style={{ padding: 8 }}>Showing first 300 of {rows.length} filtered rows — the Excel/CSV export contains all of them.</div>}
+                {rows.length === 0 && <div className="sub" style={{ padding: 12 }}>No rows match the current filters.</div>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }
