@@ -3736,12 +3736,18 @@ const IMPORT_TYPES = [
 
 function ImportCenterPage({ db, notify, actingRole, refresh }) {
   const [sel, setSel] = React.useState(null);
-  const [rows, setRows] = React.useState(null);
+  const [rows, setRows] = React.useState(null);        // editable grid data, keyed by template header
   const [fileName, setFileName] = React.useState('');
-  const [result, setResult] = React.useState(null);
+  const [result, setResult] = React.useState(null);    // last validate/commit response
+  const [dirty, setDirty] = React.useState(false);     // edits since last check
+  const [history, setHistory] = React.useState([]);
   const [busy, setBusy] = React.useState('');
   const fileRef = React.useRef(null);
   const types = IMPORT_TYPES.filter((t) => canEdit(actingRole, t.module));
+  const keyOf = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9%]/g, '');
+
+  const loadHistory = async (t) => { try { setHistory(await api.importer.history(t ? t.key : '')); } catch (_) {} };
+  useEffect(() => { loadHistory(null); }, []); // eslint-disable-line
 
   const downloadTemplate = (t) => {
     const ws = XLSX.utils.aoa_to_sheet([t.headers, t.sample]);
@@ -3752,46 +3758,73 @@ function ImportCenterPage({ db, notify, actingRole, refresh }) {
     notify(`Template downloaded — fill it and upload. Columns marked * are mandatory; the sample row shows the format (delete it before importing).`);
   };
 
+  /* normalise an uploaded row's keys onto the template headers so the grid has fixed columns */
+  const normalise = (t, raw) => {
+    const out = {};
+    const entries = Object.entries(raw);
+    t.headers.forEach((h) => {
+      const hit = entries.find(([k]) => keyOf(k) === keyOf(h));
+      let v = hit ? hit[1] : '';
+      if (v instanceof Date) v = v.toISOString().slice(0, 10);
+      out[h] = v;
+    });
+    return out;
+  };
+
+  const runCheck = async (t, data, fname) => {
+    setBusy('validate');
+    try { setResult(await api.importer.run(t.key, data, false, fname)); setDirty(false); }
+    catch (e) { notify(e.message, true); }
+    finally { setBusy(''); }
+  };
+
   const parseFile = async (t, file) => {
     try {
       const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      let data = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      data = data.map((r) => {
-        const o = {};
-        Object.entries(r).forEach(([k, v]) => { o[k] = v instanceof Date ? v.toISOString().slice(0, 10) : v; });
-        return o;
-      });
-      if (!data.length) return notify('The file has no data rows under the header row.', true);
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!raw.length) return notify('The file has no data rows under the header row.', true);
+      /* warn about mandatory columns missing from the file itself */
+      const fileKeys = Object.keys(raw[0] || {}).map(keyOf);
+      const missing = t.headers.filter((h) => h.endsWith('*') && !fileKeys.includes(keyOf(h)));
+      if (missing.length) notify(`Mandatory column(s) missing in the file: ${missing.join(', ')} — download the template to get the exact headers.`, true);
+      const data = raw.map((r) => normalise(t, r));
       setRows(data); setFileName(file.name); setResult(null);
-      setBusy('validate');
-      const res = await api.importer.run(t.key, data, false, file.name);
-      setResult(res);
+      await runCheck(t, data, file.name);
     } catch (e) { notify(e.message, true); }
-    finally { setBusy(''); if (fileRef.current) fileRef.current.value = ''; }
+    finally { if (fileRef.current) fileRef.current.value = ''; }
+  };
+
+  const editCell = (i, h, v) => {
+    setRows((rs) => { const n = rs.map((r) => ({ ...r })); n[i][h] = v; return n; });
+    setDirty(true);
   };
 
   const doImport = async () => {
     setBusy('commit');
     try {
       const res = await api.importer.run(sel.key, rows, true, fileName);
-      setResult(res);
+      setResult(res); setDirty(false);
       notify(`${res.counts.imported} ${sel.title.toLowerCase()} row(s) imported${res.counts.errors ? `, ${res.counts.errors} rejected` : ''}.`);
       await refresh(sel.refresh);
+      await loadHistory(sel);
     } catch (e) { notify(e.message, true); }
     finally { setBusy(''); }
   };
 
-  const stPill = (s) => s === 'ok' ? <Pill color="green">ready</Pill>
-    : s === 'imported' ? <Pill color="teal">imported ✓</Pill>
-    : s === 'skip' ? <Pill color="grey">blank</Pill> : <Pill color="red">error</Pill>;
+  const resFor = (i) => result && result.results.find((r) => r.row === i + 2);
+  const stPill = (r) => !r ? <Pill color="grey">—</Pill>
+    : r.status === 'ok' ? <Pill color="green">ready</Pill>
+    : r.status === 'imported' ? <Pill color="teal">imported ✓</Pill>
+    : r.status === 'skip' ? <Pill color="grey">blank</Pill> : <Pill color="red">error</Pill>;
+  const committed = result && result.commit;
 
   return (
     <>
-      <Callout>Bulk-upload data from Excel in three safe steps: <b>1.</b> download the template · <b>2.</b> fill &amp; upload — every row is checked and <b>nothing is saved yet</b> · <b>3.</b> review the green/red list and click Import — only clean rows go in. Leases, receipts and investor units still arrive as <b>Pending</b> for checker approval, and every import is recorded in Audit Logs.</Callout>
+      <Callout>Bulk-upload data from Excel in three safe steps: <b>1.</b> download the template · <b>2.</b> fill &amp; upload — every row is checked and <b>nothing is saved yet</b> · <b>3.</b> fix any red cells <b>right here in the preview</b>, re-check, and import — only clean rows go in. Leases, receipts and investor units still arrive as <b>Pending</b> for checker approval, and every import is recorded below and in Audit Logs.</Callout>
       <div className="imp-grid">
         {types.map((t) => (
-          <div key={t.key} className={`imp-card ${sel?.key === t.key ? 'sel' : ''}`} onClick={() => { setSel(t); setRows(null); setResult(null); }}>
+          <div key={t.key} className={`imp-card ${sel?.key === t.key ? 'sel' : ''}`} onClick={() => { setSel(t); setRows(null); setResult(null); setDirty(false); loadHistory(t); }}>
             <div className="imp-ico">{t.icon}</div>
             <h4>{t.title}</h4>
             <p>{t.desc}</p>
@@ -3801,50 +3834,101 @@ function ImportCenterPage({ db, notify, actingRole, refresh }) {
       {sel && (
         <div className="card" style={{ marginTop: 16, padding: 16 }}>
           <h3 style={{ margin: '0 0 4px' }}>{sel.icon} Import {sel.title}</h3>
-          <div className="sub" style={{ marginBottom: 10 }}>Columns: {sel.headers.join(' · ')}</div>
+          <div className="sub" style={{ marginBottom: 10 }}>Mandatory columns (*): <b>{sel.headers.filter((h) => h.endsWith('*')).map((h) => h.replace(/\*$/, '')).join(', ')}</b> · Optional: {sel.headers.filter((h) => !h.endsWith('*')).map((h) => h.replace(/ \(.*\)$/, '')).join(', ') || '—'}</div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <button className="btn btn-ghost" onClick={() => downloadTemplate(sel)}>⬇ Download template</button>
             <label className="btn btn-teal" style={{ cursor: 'pointer' }}>
-              {busy === 'validate' ? 'Checking…' : '⬆ Upload filled Excel'}
+              {busy === 'validate' && !rows ? 'Checking…' : '⬆ Upload filled Excel'}
               <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
                 onChange={(e) => e.target.files[0] && parseFile(sel, e.target.files[0])} />
             </label>
             {fileName && <span className="chip">{fileName}</span>}
           </div>
-          {result && (
+
+          {rows && result && (
             <>
-              <div style={{ display: 'flex', gap: 8, margin: '14px 0 8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 8, margin: '14px 0 8px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <span className="chip">{result.counts.total} rows</span>
                 {result.counts.imported > 0 && <Pill color="teal">{result.counts.imported} imported</Pill>}
-                {result.counts.ok > 0 && <Pill color="green">{result.counts.ok} ready</Pill>}
+                {!committed && result.counts.ok > 0 && <Pill color="green">{result.counts.ok} ready</Pill>}
                 {result.counts.errors > 0 && <Pill color="red">{result.counts.errors} with errors</Pill>}
                 {result.counts.skipped > 0 && <Pill color="grey">{result.counts.skipped} blank</Pill>}
-                {!result.commit && result.counts.ok > 0 && (
+                {dirty && <button className="btn btn-ghost btn-sm" disabled={busy === 'validate'} onClick={() => runCheck(sel, rows, fileName)}>{busy === 'validate' ? 'Checking…' : '⟳ Re-check edited rows'}</button>}
+                {!committed && !dirty && result.counts.ok > 0 && (
                   <button className="btn btn-teal btn-sm" disabled={busy === 'commit'} onClick={doImport}>
                     {busy === 'commit' ? 'Importing…' : `Import ${result.counts.ok} valid row(s)`}
                   </button>
                 )}
               </div>
-              {!result.commit && result.counts.errors > 0 && <Callout warn>Rows marked red will be <b>skipped</b> — you can import the green rows now and re-upload a corrected file for the rest, or fix the file first.</Callout>}
-              <div className="tablewrap" style={{ marginTop: 8, maxHeight: 420, overflow: 'auto' }}>
-                <table>
-                  <thead><tr><th style={{ width: 70 }}>Excel row</th><th style={{ width: 110 }}>Status</th><th>Details</th></tr></thead>
+              {dirty && <Callout>You have edited cells — click <b>Re-check edited rows</b> to validate again before importing.</Callout>}
+              {!committed && !dirty && result.counts.errors > 0 && <Callout warn>Red cells show exactly what is wrong — fix them here in the table (or in the file) and re-check. Rows still red when you import are <b>skipped</b>.</Callout>}
+
+              <div className="tablewrap" style={{ marginTop: 8, maxHeight: 440, overflow: 'auto' }}>
+                <table className="imp-table">
+                  <thead>
+                    <tr>
+                      <th style={{ minWidth: 46 }}>Row</th>
+                      <th style={{ minWidth: 86 }}>Status</th>
+                      {sel.headers.map((h) => (
+                        <th key={h}>{h.endsWith('*') ? <>{h.slice(0, -1)}<span className="req">*</span></> : h}</th>
+                      ))}
+                      <th style={{ minWidth: 220 }}>Problem</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {result.results.slice(0, 500).map((r) => (
-                      <tr key={r.row}>
-                        <td className="sub">#{r.row}</td>
-                        <td>{stPill(r.status)}</td>
-                        <td style={r.status === 'error' ? { color: 'var(--red)' } : undefined}>{r.code ? <><span className="code">{r.code}</span> · </> : null}{r.message}</td>
-                      </tr>
-                    ))}
+                    {rows.slice(0, 300).map((r, i) => {
+                      const res = resFor(i);
+                      const isErr = res && res.status === 'error';
+                      const errCol = isErr && res.col ? sel.headers.find((h) => keyOf(h).includes(keyOf(res.col)) || keyOf(res.col).includes(keyOf(h))) : null;
+                      return (
+                        <tr key={i} className={isErr ? 'imp-err-row' : ''}>
+                          <td className="sub">#{i + 2}</td>
+                          <td>{dirty && !committed ? <Pill color="amber">edited</Pill> : stPill(res)}</td>
+                          {sel.headers.map((h) => (
+                            <td key={h} className={errCol === h ? 'imp-err-cell' : ''}>
+                              <input className="imp-cell" value={r[h] ?? ''} disabled={!!committed}
+                                title={errCol === h ? res.message : undefined}
+                                onChange={(e) => editCell(i, h, e.target.value)} />
+                            </td>
+                          ))}
+                          <td className="sub" style={isErr ? { color: 'var(--red)' } : undefined}>
+                            {res && res.code ? <><span className="code">{res.code}</span> · </> : null}{res ? res.message : ''}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
-                {result.results.length > 500 && <div className="sub" style={{ padding: 8 }}>…and {result.results.length - 500} more rows.</div>}
+                {rows.length > 300 && <div className="sub" style={{ padding: 8 }}>…and {rows.length - 300} more rows (they are validated and imported too — only the preview is capped).</div>}
               </div>
             </>
           )}
         </div>
       )}
+
+      <div className="card" style={{ marginTop: 16, padding: 16 }}>
+        <h3 style={{ margin: '0 0 8px' }}>Upload history{sel ? ` — ${sel.title}` : ''}</h3>
+        {history.length === 0 ? <div className="sub">No imports yet{sel ? ' for this type' : ''}.</div> : (
+          <div className="tablewrap">
+            <table>
+              <thead><tr><th>When</th><th>Type</th><th>File</th><th className="num">Rows</th><th className="num">Imported</th><th className="num">Rejected</th><th>By</th></tr></thead>
+              <tbody>
+                {history.map((h) => (
+                  <tr key={h.id}>
+                    <td className="sub">{new Date(h.at).toLocaleString('en-GB')}</td>
+                    <td><Pill color="grey">{(IMPORT_TYPES.find((t) => t.key === h.type) || { title: h.type }).title}</Pill></td>
+                    <td>{h.fileName || '—'}</td>
+                    <td className="num">{h.total}</td>
+                    <td className="num" style={{ color: 'var(--green)' }}>{h.imported}</td>
+                    <td className="num" style={{ color: h.rejected ? 'var(--red)' : undefined }}>{h.rejected}</td>
+                    <td className="sub">{h.by}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </>
   );
 }

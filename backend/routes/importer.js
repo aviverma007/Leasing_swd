@@ -91,28 +91,28 @@ const TYPES = {
     },
     validate(ctx, row) {
       const name = norm(field(row, 'Unit Name', 'Unit', 'Name'));
-      if (!name) return { error: 'Unit Name is required.' };
-      if (ctx.units.has(name)) return { error: `Unit "${name}" already exists — edit it in Unit Master instead.` };
-      if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}" appears more than once.` };
+      if (!name) return { error: 'Unit Name is required.', col: 'Unit Name' };
+      if (ctx.units.has(name)) return { error: `Unit "${name}" already exists — edit it in Unit Master instead.`, col: 'Unit Name' };
+      if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}" appears more than once.`, col: 'Unit Name' };
       const assetName = norm(field(row, 'Asset', 'Asset Name', 'Project'));
       let assetId = null;
       if (assetName) {
         const a = ctx.assets.get(assetName);
-        if (!a) { const sg = ctx.assets.suggest(assetName); return { error: `Asset "${assetName}" not found${sg ? ` — did you mean "${sg}"?` : '.'}` }; }
+        if (!a) { const sg = ctx.assets.suggest(assetName); return { error: `Asset "${assetName}" not found${sg ? ` — did you mean "${sg}"?` : '.'}`, col: 'Asset' }; }
         assetId = a.Id;
       } else if (ctx.assetRows.length === 1) assetId = ctx.assetRows[0].Id;
       const blockName = norm(field(row, 'Block'));
       let blockId = null;
-      if (blockName) { const b = ctx.blocks.get(blockName); if (!b) return { error: `Block "${blockName}" not found.` }; blockId = b.Id; }
+      if (blockName) { const b = ctx.blocks.get(blockName); if (!b) return { error: `Block "${blockName}" not found.`, col: 'Block' }; blockId = b.Id; }
       const builtup = num(field(row, 'Builtup Area (sqft)', 'Builtup Area', 'Builtup'));
       const carpet = num(field(row, 'Carpet Area (sqft)', 'Carpet Area', 'Carpet'));
       const card = num(field(row, 'Card Rate (Rs/sqft)', 'Card Rate', 'CardRate'));
       for (const [v, l] of [[builtup, 'Builtup Area'], [carpet, 'Carpet Area'], [card, 'Card Rate']]) {
-        if (Number.isNaN(v)) return { error: `${l} is not a number.` };
-        if (v != null && v < 0) return { error: `${l} cannot be negative.` };
+        if (Number.isNaN(v)) return { error: `${l} is not a number.`, col: l };
+        if (v != null && v < 0) return { error: `${l} cannot be negative.`, col: l };
       }
       const status = norm(field(row, 'Status')) || 'Vacant';
-      if (!['Vacant', 'Leased', 'Blocked'].includes(status)) return { error: `Status must be Vacant, Leased or Blocked (got "${status}").` };
+      if (!['Vacant', 'Leased', 'Blocked'].includes(status)) return { error: `Status must be Vacant, Leased or Blocked (got "${status}").`, col: 'Status' };
       ctx.seen.add(low(name));
       return { data: { name, assetId, blockId, floor: num(field(row, 'Floor')) || 0, builtup, carpet, card, unitType: norm(field(row, 'Unit Type')), owner: norm(field(row, 'Owner')), status }, summary: `${name}${card ? ` · card ₹${card}/sqft` : ''}` };
     },
@@ -138,15 +138,15 @@ const TYPES = {
     },
     validate(ctx, row) {
       const name = norm(field(row, 'Brand Name', 'Brand', 'Name'));
-      if (!name) return { error: 'Brand Name is required.' };
-      if (ctx.brands.has(name)) return { error: `Brand "${name}" already exists.` };
+      if (!name) return { error: 'Brand Name is required.', col: 'Brand Name' };
+      if (ctx.brands.has(name)) return { error: `Brand "${name}" already exists.`, col: 'Brand Name' };
       if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}".` };
       const email = norm(field(row, 'Billing Email', 'Email'));
-      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: `"${email}" is not a valid e-mail.` };
+      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: `"${email}" is not a valid e-mail.`, col: 'Billing Email' };
       const gstin = norm(field(row, 'GSTIN'));
-      if (gstin && gstin.length !== 15) return { error: `GSTIN must be 15 characters (got ${gstin.length}).` };
+      if (gstin && gstin.length !== 15) return { error: `GSTIN must be 15 characters (got ${gstin.length}).`, col: 'GSTIN' };
       const pan = norm(field(row, 'PAN'));
-      if (pan && !/^[A-Za-z]{5}\d{4}[A-Za-z]$/.test(pan)) return { error: `"${pan}" is not a valid PAN.` };
+      if (pan && !/^[A-Za-z]{5}\d{4}[A-Za-z]$/.test(pan)) return { error: `"${pan}" is not a valid PAN.`, col: 'PAN' };
       ctx.seen.add(low(name));
       return { data: { name, category: norm(field(row, 'Category')), email, gstin, pan, address: norm(field(row, 'Address')) }, summary: `${name}${email ? ' · ' + email : ''}` };
     },
@@ -170,8 +170,8 @@ const TYPES = {
     },
     validate(ctx, row) {
       const name = norm(field(row, 'Broker Name', 'Broker', 'Name'));
-      if (!name) return { error: 'Broker Name is required.' };
-      if (ctx.brokers.has(name)) return { error: `Broker "${name}" already exists.` };
+      if (!name) return { error: 'Broker Name is required.', col: 'Broker Name' };
+      if (ctx.brokers.has(name)) return { error: `Broker "${name}" already exists.`, col: 'Broker Name' };
       if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}".` };
       ctx.seen.add(low(name));
       return { data: { name, firm: norm(field(row, 'Firm')), phone: norm(field(row, 'Phone')), email: norm(field(row, 'Email')), pan: norm(field(row, 'PAN')), rera: norm(field(row, 'RERA No', 'RERA')) }, summary: name };
@@ -196,8 +196,8 @@ const TYPES = {
     },
     validate(ctx, row) {
       const name = norm(field(row, 'Customer Name', 'Customer', 'Name'));
-      if (!name) return { error: 'Customer Name is required.' };
-      if (ctx.customers.has(name)) return { error: `Customer "${name}" already exists.` };
+      if (!name) return { error: 'Customer Name is required.', col: 'Customer Name' };
+      if (ctx.customers.has(name)) return { error: `Customer "${name}" already exists.`, col: 'Customer Name' };
       if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}".` };
       ctx.seen.add(low(name));
       return { data: { name, custType: norm(field(row, 'Type', 'Customer Type')), phone: norm(field(row, 'Phone')), email: norm(field(row, 'Email')), pan: norm(field(row, 'PAN')), gstin: norm(field(row, 'GSTIN')), address: norm(field(row, 'Address')), nri: yesNo(field(row, 'NRI (Yes/No)', 'NRI')) }, summary: name };
@@ -223,17 +223,17 @@ const TYPES = {
     },
     validate(ctx, row) {
       const code = norm(field(row, 'Lease Code', 'Lease'));
-      if (!code) return { error: 'Lease Code is required (e.g. LSE-0047).' };
+      if (!code) return { error: 'Lease Code is required (e.g. LSE-0047).', col: 'Lease Code' };
       const lease = ctx.leases.get(code);
-      if (!lease) { const sg = ctx.leases.suggest(code); return { error: `Lease "${code}" not found${sg ? ` — did you mean "${sg}"?` : '.'}` }; }
+      if (!lease) { const sg = ctx.leases.suggest(code); return { error: `Lease "${code}" not found${sg ? ` — did you mean "${sg}"?` : '.'}`, col: 'Lease Code' }; }
       const ym = parseYm(field(row, 'Month (YYYY-MM)', 'Month', 'Ym'));
-      if (!ym) return { error: 'Month is required (YYYY-MM, e.g. 2026-10).' };
-      if (Number.isNaN(ym)) return { error: `Month "${norm(field(row, 'Month (YYYY-MM)', 'Month', 'Ym'))}" is not a valid YYYY-MM.` };
+      if (!ym) return { error: 'Month is required (YYYY-MM, e.g. 2026-10).', col: 'Month' };
+      if (Number.isNaN(ym)) return { error: `Month "${norm(field(row, 'Month (YYYY-MM)', 'Month', 'Ym'))}" is not a valid YYYY-MM.`, col: 'Month' };
       const amount = num(field(row, 'Sales Amount', 'Amount', 'Sales'));
-      if (amount == null || Number.isNaN(amount)) return { error: 'Sales Amount is required and must be a number.' };
-      if (amount < 0) return { error: 'Sales Amount cannot be negative.' };
+      if (amount == null || Number.isNaN(amount)) return { error: 'Sales Amount is required and must be a number.', col: 'Sales Amount' };
+      if (amount < 0) return { error: 'Sales Amount cannot be negative.', col: 'Sales Amount' };
       const key = low(code) + '|' + ym;
-      if (ctx.seen.has(key)) return { error: `Duplicate in file: ${code} / ${ym} appears more than once.` };
+      if (ctx.seen.has(key)) return { error: `Duplicate in file: ${code} / ${ym} appears more than once.`, col: 'Month' };
       ctx.seen.add(key);
       return { data: { leaseId: lease.Id, code: lease.Code, ym, amount }, summary: `${lease.Code} · ${ym} · ₹${amount.toLocaleString('en-IN')}` };
     },
@@ -264,22 +264,22 @@ const TYPES = {
     },
     validate(ctx, row) {
       const no = norm(field(row, 'Invoice No', 'Invoice'));
-      if (!no) return { error: 'Invoice No is required (e.g. INV-0112).' };
+      if (!no) return { error: 'Invoice No is required (e.g. INV-0112).', col: 'Invoice No' };
       const inv = ctx.invoices.get(no);
-      if (!inv) { const sg = ctx.invoices.suggest(no); return { error: `Invoice "${no}" not found${sg ? ` — did you mean "${sg}"?` : '.'}` }; }
-      if ((inv.DocStatus || 'Approved') !== 'Approved') return { error: `Invoice ${inv.No} is ${inv.DocStatus} — receipts can only be recorded against approved invoices.` };
+      if (!inv) { const sg = ctx.invoices.suggest(no); return { error: `Invoice "${no}" not found${sg ? ` — did you mean "${sg}"?` : '.'}`, col: 'Invoice No' }; }
+      if ((inv.DocStatus || 'Approved') !== 'Approved') return { error: `Invoice ${inv.No} is ${inv.DocStatus} — receipts can only be recorded against approved invoices.`, col: 'Invoice No' };
       const date = parseDate(field(row, 'Date (YYYY-MM-DD)', 'Date', 'Receipt Date'));
-      if (!date) return { error: 'Date is required (YYYY-MM-DD or DD/MM/YYYY).' };
-      if (Number.isNaN(date)) return { error: `Date "${norm(field(row, 'Date (YYYY-MM-DD)', 'Date', 'Receipt Date'))}" is not a valid date.` };
+      if (!date) return { error: 'Date is required (YYYY-MM-DD or DD/MM/YYYY).', col: 'Date' };
+      if (Number.isNaN(date)) return { error: `Date "${norm(field(row, 'Date (YYYY-MM-DD)', 'Date', 'Receipt Date'))}" is not a valid date.`, col: 'Date' };
       const amount = num(field(row, 'Amount', 'Receipt Amount'));
-      if (amount == null || Number.isNaN(amount) || amount <= 0) return { error: 'Amount must be a positive number.' };
+      if (amount == null || Number.isNaN(amount) || amount <= 0) return { error: 'Amount must be a positive number.', col: 'Amount' };
       const tdsPct = num(field(row, 'TDS %', 'TDS')) || 0;
-      if (Number.isNaN(tdsPct) || tdsPct < 0 || tdsPct > 30) return { error: 'TDS % must be between 0 and 30.' };
+      if (Number.isNaN(tdsPct) || tdsPct < 0 || tdsPct > 30) return { error: 'TDS % must be between 0 and 30.', col: 'TDS %' };
       let instrument = norm(field(row, 'Instrument (NEFT/Cheque)', 'Instrument', 'Mode')) || 'NEFT';
       instrument = instrument.toLowerCase() === 'cheque' ? 'Cheque' : 'NEFT';
       const ref = norm(field(row, 'Reference (UTR/Cheque No)', 'Reference', 'Ref', 'UTR'));
-      if (ref && ctx.refs.has(low(ref))) return { error: `Reference "${ref}" already exists on another receipt — looks like a duplicate.` };
-      if (ref && ctx.seen.has(low(ref))) return { error: `Duplicate in file: reference "${ref}".` };
+      if (ref && ctx.refs.has(low(ref))) return { error: `Reference "${ref}" already exists on another receipt — looks like a duplicate.`, col: 'Reference' };
+      if (ref && ctx.seen.has(low(ref))) return { error: `Duplicate in file: reference "${ref}".`, col: 'Reference' };
       if (ref) ctx.seen.add(low(ref));
       return { data: { invoiceId: inv.Id, invNo: inv.No, date, amount, tdsPct, instrument, ref }, summary: `${inv.No} · ₹${amount.toLocaleString('en-IN')} · ${instrument}${ref ? ' ' + ref : ''}` };
     },
@@ -311,33 +311,33 @@ const TYPES = {
     validate(ctx, row) {
       const brandName = norm(field(row, 'Brand Name', 'Brand'));
       const unitName = norm(field(row, 'Unit Name', 'Unit'));
-      if (!brandName) return { error: 'Brand Name is required.' };
-      if (!unitName) return { error: 'Unit Name is required.' };
+      if (!brandName) return { error: 'Brand Name is required.', col: 'Brand Name' };
+      if (!unitName) return { error: 'Unit Name is required.', col: 'Unit Name' };
       const brand = ctx.brands.get(brandName);
-      if (!brand) { const sg = ctx.brands.suggest(brandName); return { error: `Brand "${brandName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import brands first.'}` }; }
+      if (!brand) { const sg = ctx.brands.suggest(brandName); return { error: `Brand "${brandName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import brands first.'}`, col: 'Brand Name' }; }
       const unit = ctx.units.get(unitName);
-      if (!unit) { const sg = ctx.units.suggest(unitName); return { error: `Unit "${unitName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import units first.'}` }; }
-      if (low(unit.Status) === 'leased') return { error: `Unit ${unit.Name} is already Leased.` };
-      if (ctx.seen.has(low(unitName))) return { error: `Duplicate in file: unit "${unitName}" used by more than one lease.` };
+      if (!unit) { const sg = ctx.units.suggest(unitName); return { error: `Unit "${unitName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import units first.'}`, col: 'Unit Name' }; }
+      if (low(unit.Status) === 'leased') return { error: `Unit ${unit.Name} is already Leased.`, col: 'Unit Name' };
+      if (ctx.seen.has(low(unitName))) return { error: `Duplicate in file: unit "${unitName}" used by more than one lease.`, col: 'Unit Name' };
       ctx.seen.add(low(unitName));
       const start = parseDate(field(row, 'Start Date', 'Start'));
       const end = parseDate(field(row, 'End Date', 'End'));
-      if (!start || Number.isNaN(start)) return { error: 'Start Date is required (YYYY-MM-DD or DD/MM/YYYY).' };
-      if (!end || Number.isNaN(end)) return { error: 'End Date is required (YYYY-MM-DD or DD/MM/YYYY).' };
-      if (end <= start) return { error: `End Date (${end}) must be after Start Date (${start}).` };
+      if (!start || Number.isNaN(start)) return { error: 'Start Date is required (YYYY-MM-DD or DD/MM/YYYY).', col: 'Start Date' };
+      if (!end || Number.isNaN(end)) return { error: 'End Date is required (YYYY-MM-DD or DD/MM/YYYY).', col: 'End Date' };
+      if (end <= start) return { error: `End Date (${end}) must be after Start Date (${start}).`, col: 'End Date' };
       const rt = norm(field(row, 'Rental Type', 'Type')) || 'MG';
       const RT = { mg: 'MG', mgvsrs: 'MGvsRS', purers: 'PureRS', varrs: 'VarRS' }[low(rt).replace(/[^a-z]/g, '')];
-      if (!RT) return { error: `Rental Type must be MG, MGvsRS, PureRS or VarRS (got "${rt}").` };
+      if (!RT) return { error: `Rental Type must be MG, MGvsRS, PureRS or VarRS (got "${rt}").`, col: 'Rental Type' };
       const mg = num(field(row, 'MG', 'MG Amount')) || 0;
       const mgBasis = low(field(row, 'MG Basis (PerSqFt/Lumpsum)', 'MG Basis')) === 'lumpsum' ? 'Lumpsum' : 'PerSqFt';
       const rs = num(field(row, 'Rev Share %', 'RS %')) || 0;
-      if (RT !== 'PureRS' && !mg) return { error: `${RT} lease needs an MG amount.` };
-      if (RT !== 'MG' && !rs) return { error: `${RT} lease needs a Rev Share %.` };
+      if (RT !== 'PureRS' && !mg) return { error: `${RT} lease needs an MG amount.`, col: 'MG' };
+      if (RT !== 'MG' && !rs) return { error: `${RT} lease needs a Rev Share %.`, col: 'Rev Share %' };
       for (const [v, l] of [[mg, 'MG'], [rs, 'Rev Share %'], [num(field(row, 'CAM (Rs/sqft)', 'CAM')), 'CAM'], [num(field(row, 'Escalation %', 'Esc %')), 'Escalation %'], [num(field(row, 'Deposit')), 'Deposit'], [num(field(row, 'GST %')), 'GST %'], [num(field(row, 'Lock-in Months', 'Lockin')), 'Lock-in Months']]) {
-        if (Number.isNaN(v)) return { error: `${l} is not a number.` };
+        if (Number.isNaN(v)) return { error: `${l} is not a number.`, col: l };
       }
       const rentStart = parseDate(field(row, 'Rent Start Date (optional)', 'Rent Start Date', 'RCD'));
-      if (Number.isNaN(rentStart)) return { error: 'Rent Start Date is not a valid date.' };
+      if (Number.isNaN(rentStart)) return { error: 'Rent Start Date is not a valid date.', col: 'Rent Start Date' };
       return {
         data: {
           brandId: brand.Id, unitId: unit.Id, assetId: unit.AssetId, brandName: brand.Name, unitName: unit.Name,
@@ -382,15 +382,15 @@ const TYPES = {
     validate(ctx, row) {
       const unitName = norm(field(row, 'Unit Name', 'Unit'));
       const invName = norm(field(row, 'Investor Name', 'Investor'));
-      if (!unitName) return { error: 'Unit Name is required.' };
-      if (!invName) return { error: 'Investor Name is required.' };
+      if (!unitName) return { error: 'Unit Name is required.', col: 'Unit Name' };
+      if (!invName) return { error: 'Investor Name is required.', col: 'Investor Name' };
       const unit = ctx.units.get(unitName);
-      if (!unit) { const sg = ctx.units.suggest(unitName); return { error: `Unit "${unitName}" not found${sg ? ` — did you mean "${sg}"?` : '.'}` }; }
-      if (ctx.existing.has(unit.Id)) return { error: `Unit ${unit.Name} already has an investor record — edit it in Investor Units.` };
+      if (!unit) { const sg = ctx.units.suggest(unitName); return { error: `Unit "${unitName}" not found${sg ? ` — did you mean "${sg}"?` : '.'}`, col: 'Unit Name' }; }
+      if (ctx.existing.has(unit.Id)) return { error: `Unit ${unit.Name} already has an investor record — edit it in Investor Units.`, col: 'Unit Name' };
       const area = num(field(row, 'Area %')) || 0;
       const disb = num(field(row, 'Disburse %', 'Disbursement %'));
-      if (disb == null || Number.isNaN(disb) || disb <= 0) return { error: 'Disburse % must be a positive number.' };
-      if (Number.isNaN(area)) return { error: 'Area % is not a number.' };
+      if (disb == null || Number.isNaN(disb) || disb <= 0) return { error: 'Disburse % must be a positive number.', col: 'Disburse %' };
+      if (Number.isNaN(area)) return { error: 'Area % is not a number.', col: 'Area %' };
       const g = ctx.groups.get(low(unitName)) || { unitId: unit.Id, unitName: unit.Name, floor: unit.Floor || 0, investors: [], total: 0 };
       g.investors.push({ name: invName, area, disb, nri: yesNo(field(row, 'NRI (Yes/No)', 'NRI')), bank: norm(field(row, 'Bank')), acc: norm(field(row, 'Account No', 'Account')), ifsc: norm(field(row, 'IFSC')) });
       g.total += disb;
@@ -402,7 +402,7 @@ const TYPES = {
       for (const r of results) {
         if (r.status !== 'ok' || !r.data || !r.data.group) continue;
         const g = ctx.groups.get(r.data.group);
-        if (g && Math.abs(g.total - 100) > 0.5) { r.status = 'error'; r.message = `Unit ${g.unitName}: Disburse % across its rows totals ${g.total}% — must be 100%.`; }
+        if (g && Math.abs(g.total - 100) > 0.5) { r.status = 'error'; r.message = `Unit ${g.unitName}: Disburse % across its rows totals ${g.total}% — must be 100%.`; r.col = 'Disburse %'; }
       }
     },
     async commit(pool, d, by, ctx) {
@@ -429,6 +429,19 @@ const TYPES = {
   }
 };
 
+/* ── upload history ──────────────────────────────────────────────────── */
+router.get('/history', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const t = String(req.query.type || '').trim();
+    const reqq = pool.request();
+    let where = '';
+    if (t) { reqq.input('t', sql.VarChar(30), t); where = 'WHERE ImportType=@t'; }
+    const r = await reqq.query(`SELECT TOP 100 Id, ImportType, FileName, TotalRows, Imported, Rejected, ByUser, At FROM ${SCHEMA}.ImportLog ${where} ORDER BY At DESC`);
+    res.json(r.recordset.map((x) => ({ id: x.Id, type: x.ImportType, fileName: x.FileName, total: x.TotalRows, imported: x.Imported, rejected: x.Rejected, by: x.ByUser, at: new Date(x.At).toISOString() })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ── the one route ───────────────────────────────────────────────────── */
 router.post('/:type', async (req, res) => {
   try {
@@ -451,7 +464,7 @@ router.post('/:type', async (req, res) => {
       if (blank) return { row: i + 2, status: 'skip', message: 'Blank row — ignored.' };
       try {
         const r = def.validate(ctx, row);
-        if (r.error) return { row: i + 2, status: 'error', message: r.error };
+        if (r.error) return { row: i + 2, status: 'error', message: r.error, col: r.col || null };
         return { row: i + 2, status: 'ok', message: r.summary, data: r.data };
       } catch (e) { return { row: i + 2, status: 'error', message: e.message }; }
     });
@@ -465,8 +478,15 @@ router.post('/:type', async (req, res) => {
         try { const code = await def.commit(pool, r.data, by, ctx); r.status = 'imported'; r.code = code; imported++; }
         catch (e) { r.status = 'error'; r.message = 'Database error: ' + e.message; failed++; }
       }
+      const rejected = results.filter(r => r.status === 'error').length;
       await logAudit(pool, 'settings', 'import-' + req.params.type, 'imported',
-        `Excel import (${def.label}): ${imported} imported, ${results.filter(r => r.status === 'error').length} rejected, of ${rows.length} row(s)${fileName ? ` from ${fileName}` : ''}`, by);
+        `Excel import (${def.label}): ${imported} imported, ${rejected} rejected, of ${rows.length} row(s)${fileName ? ` from ${fileName}` : ''}`, by);
+      try {
+        await pool.request().input('id', sql.VarChar(40), uid()).input('t', sql.VarChar(30), req.params.type)
+          .input('f', sql.NVarChar(300), fileName || null).input('tot', sql.Int, rows.length)
+          .input('im', sql.Int, imported).input('rj', sql.Int, rejected).input('by', sql.NVarChar(150), by)
+          .query(`INSERT INTO ${SCHEMA}.ImportLog (Id,ImportType,FileName,TotalRows,Imported,Rejected,ByUser) VALUES (@id,@t,@f,@tot,@im,@rj,@by)`);
+      } catch (_) { /* history table optional */ }
     }
     res.json({
       type: req.params.type, commit,

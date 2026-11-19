@@ -136,6 +136,15 @@ const TABLES = [
       LeaseId VARCHAR(40) NOT NULL,
       UnitId VARCHAR(40) NOT NULL,
       RatePsf DECIMAL(18,2) NULL)`],
+  ['ImportLog', `CREATE TABLE {S}.ImportLog(
+      Id VARCHAR(40) PRIMARY KEY,
+      ImportType VARCHAR(30) NOT NULL,
+      FileName NVARCHAR(300) NULL,
+      TotalRows INT NOT NULL DEFAULT 0,
+      Imported INT NOT NULL DEFAULT 0,
+      Rejected INT NOT NULL DEFAULT 0,
+      ByUser NVARCHAR(150) NULL,
+      At DATETIME2 NOT NULL DEFAULT SYSDATETIME())`],
   ['DunningLog', `CREATE TABLE {S}.DunningLog(
       Id VARCHAR(40) PRIMARY KEY,
       InvoiceId VARCHAR(40) NOT NULL,

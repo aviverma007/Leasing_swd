@@ -170,6 +170,7 @@ export const api = {
   search: (q) => req('GET', `/search?q=${encodeURIComponent(q)}`),
   stats: { workspace: () => req('GET', '/stats/workspace') },
   importer: {
-    run: (type, rows, commit, fileName) => req('POST', `/import/${type}`, { rows, commit, fileName })
+    run: (type, rows, commit, fileName) => req('POST', `/import/${type}`, { rows, commit, fileName }),
+    history: (type) => req('GET', '/import/history' + (type ? `?type=${type}` : ''))
   }
 };
