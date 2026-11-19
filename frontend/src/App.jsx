@@ -3711,38 +3711,36 @@ const AUDIT_VIEW = { leases: 'leases', invoices: 'invoices', collections: 'colle
    Imported leases/receipts/investor-units land as Pending (maker–checker). */
 const IMPORT_TYPES = [
   { key: 'sales', icon: '📈', title: 'Monthly Sales', module: 'sales', refresh: ['sales', 'invoices'],
-    desc: 'Rev-share brands\' monthly sales — updates existing months, creates missing ones, re-syncs the RS invoice.',
-    headers: ['Lease Code*', 'Month (YYYY-MM)*', 'Sales Amount*'],
-    sample: ['LSE-0047', '2026-10', 5400000] },
+    desc: "Rev-share brands' monthly sales — updates existing months, creates missing ones, re-syncs the RS invoice." },
   { key: 'collections', icon: '🧾', title: 'Receipts (Collections)', module: 'collections', refresh: ['collections', 'invoices'],
-    desc: 'Bank receipts against invoices — land as Pending for checker approval. Duplicate UTR/cheque refs are rejected.',
-    headers: ['Invoice No*', 'Date (YYYY-MM-DD)*', 'Amount*', 'TDS %', 'Instrument (NEFT/Cheque)', 'Reference (UTR/Cheque No)'],
-    sample: ['INV-0112', '2026-11-15', 43937.51, 10, 'NEFT', 'UTR9988776655'] },
+    desc: 'Bank receipts against invoices — land as Pending for checker approval. Duplicate UTR/cheque refs are rejected.' },
   { key: 'units', icon: '🏬', title: 'Units', module: 'units', refresh: ['units'],
-    desc: 'New units with areas and card rate. Existing unit names are rejected (edit those in Unit Master).',
-    headers: ['Unit Name*', 'Asset', 'Block', 'Floor', 'Builtup Area (sqft)', 'Carpet Area (sqft)', 'Card Rate (Rs/sqft)', 'Unit Type', 'Owner', 'Status'],
-    sample: ['G-21', 'Gems-2 Commercial, Sec-89', '', 0, 1131.64, 905.31, 145, 'Retail', '', 'Vacant'] },
+    desc: 'New units with areas, PLC, card rate and owner. Existing unit names are rejected (edit those in Unit Master).' },
   { key: 'brands', icon: '🏷️', title: 'Brands (Tenants)', module: 'brands', refresh: ['brands'],
-    desc: 'New tenant brands with billing e-mail (used by payment reminders), GSTIN and PAN — both are format-checked.',
-    headers: ['Brand Name*', 'Category', 'Billing Email', 'GSTIN', 'PAN', 'Address'],
-    sample: ['Blue Tokai', 'F&B', 'accounts@bluetokai.com', '06AABCU9603R1ZV', 'AABCU9603R', 'Gurugram'] },
+    desc: 'Tenant brands with lessee company, billing e-mail (payment reminders), GSTIN and PAN — format-checked.' },
+  { key: 'companies', icon: '🏢', title: 'Companies (Lessees)', module: 'companies', refresh: ['companies'],
+    desc: 'Tenant legal entities — a company can run multiple brands.' },
+  { key: 'assets', icon: '🏗️', title: 'Projects', module: 'assets', refresh: ['assets'],
+    desc: 'Properties under management — landlord, RERA, bank details for invoicing.' },
+  { key: 'blocks', icon: '🧱', title: 'Blocks', module: 'blocks', refresh: ['blocks'],
+    desc: 'Wings/blocks within a project — project must exist first.' },
   { key: 'brokers', icon: '🤝', title: 'Brokers', module: 'brands', refresh: ['brokers'],
-    desc: 'Channel partners for lease sourcing.',
-    headers: ['Broker Name*', 'Firm', 'Phone', 'Email', 'PAN', 'RERA No'],
-    sample: ['Rahul Khanna', 'RK Realty', '98100 00000', 'rahul@rkrealty.in', 'AAAPK1234K', ''] },
+    desc: 'Channel partners for lease sourcing.' },
   { key: 'customers', icon: '👤', title: 'Customers (Unit Owners)', module: 'units', refresh: ['customers'],
-    desc: 'Unit owners / customers master.',
-    headers: ['Customer Name*', 'Type', 'Phone', 'Email', 'PAN', 'GSTIN', 'Address', 'NRI (Yes/No)'],
-    sample: ['Juhi Nagar', 'Individual', '98100 11111', 'juhi@gmail.com', 'AAAPN1111A', '', 'Delhi', 'No'] },
+    desc: 'Unit owners / customers with KYC and bank details.' },
   { key: 'leases', icon: '📜', title: 'Leases', module: 'leases', refresh: ['leases', 'units'],
-    desc: 'Core commercial terms per lease — brand & unit must exist first. Imported leases are Pending until a checker approves; open each to add deed dates, parties and documents.',
-    headers: ['Brand Name*', 'Unit Name*', 'Start Date*', 'End Date*', 'Rental Type', 'MG', 'MG Basis (PerSqFt/Lumpsum)', 'Rev Share %', 'CAM (Rs/sqft)', 'Utility (Rs/sqft)', 'Escalation %', 'Deposit', 'GST %', 'Lock-in Months', 'Rent Start Date (optional)'],
-    sample: ['Blue Tokai', 'K-06', '2026-04-01', '2029-03-31', 'MG', 129.78, 'PerSqFt', '', 20, 0, 5, 111706, 18, 36, '2026-04-15'] },
+    desc: 'FULL lease import — every wizard field (135 columns): commercial terms, all dates, NFA, SD/CAM/brokerage schedules, lessor/lessee details. Only the first 4 columns are mandatory; imported leases are Pending until approved.' },
   { key: 'investorunits', icon: '💼', title: 'Investor Units', module: 'investors', refresh: ['investorUnits'],
-    desc: 'One row per investor; rows with the same unit combine into one record — Disburse % per unit must total 100. Lands as Pending.',
-    headers: ['Unit Name*', 'Investor Name*', 'Area %', 'Disburse %*', 'NRI (Yes/No)', 'Bank', 'Account No', 'IFSC'],
-    sample: ['K-06', 'Juhi Nagar', 100, 100, 'No', 'HDFC Bank', '50100222333', 'HDFC0000123'] }
+    desc: 'One row per investor; rows with the same unit combine into one record — Disburse % per unit must total 100. Lands as Pending.' }
 ];
+
+/* Column definitions come from the server (single source of truth with the validator). */
+let IMPORT_DEFS_CACHE = null;
+async function getImportDef(key) {
+  if (!IMPORT_DEFS_CACHE) IMPORT_DEFS_CACHE = await api.importer.defs();
+  return IMPORT_DEFS_CACHE.find((d) => d.key === key) || { headers: [], sample: [] };
+}
+
 
 /* The per-type uploader + editable grid + history — used by the Import Center page
    and by the Import/Export menu on every list page (inside a modal). */
@@ -3754,15 +3752,20 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
   const [history, setHistory] = React.useState([]);
   const [busy, setBusy] = React.useState('');
   const fileRef = React.useRef(null);
+  const [hdrs, setHdrs] = React.useState(null);
   const keyOf = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9%]/g, '');
 
   const loadHistory = async () => { try { setHistory(await api.importer.history(t.key)); } catch (_) {} };
-  useEffect(() => { setRows(null); setResult(null); setDirty(false); setFileName(''); if (showHistory) loadHistory(); }, [t.key]); // eslint-disable-line
+  useEffect(() => {
+    setRows(null); setResult(null); setDirty(false); setFileName(''); setHdrs(null);
+    getImportDef(t.key).then((d) => setHdrs(d.headers)).catch(() => setHdrs([]));
+    if (showHistory) loadHistory();
+  }, [t.key]); // eslint-disable-line
 
   const normalise = (raw) => {
     const out = {};
     const entries = Object.entries(raw);
-    t.headers.forEach((h) => {
+    (hdrs || []).forEach((h) => {
       const hit = entries.find(([k]) => keyOf(k) === keyOf(h));
       let v = hit ? hit[1] : '';
       if (v instanceof Date) v = v.toISOString().slice(0, 10);
@@ -3785,7 +3788,7 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
       const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
       if (!raw.length) return notify('The file has no data rows under the header row.', true);
       const fileKeys = Object.keys(raw[0] || {}).map(keyOf);
-      const missing = t.headers.filter((h) => h.endsWith('*') && !fileKeys.includes(keyOf(h)));
+      const missing = (hdrs || []).filter((h) => h.endsWith('*') && !fileKeys.includes(keyOf(h)));
       if (missing.length) notify(`Mandatory column(s) missing in the file: ${missing.join(', ')} — download the template to get the exact headers.`, true);
       const data = raw.map(normalise);
       setRows(data); setFileName(file.name); setResult(null);
@@ -3820,10 +3823,10 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
 
   return (
     <>
-      <div className="sub" style={{ marginBottom: 10 }}>Mandatory columns (*): <b>{t.headers.filter((h) => h.endsWith('*')).map((h) => h.replace(/\*$/, '')).join(', ')}</b> · Optional: {t.headers.filter((h) => !h.endsWith('*')).map((h) => h.replace(/ \(.*\)$/, '')).join(', ') || '—'}</div>
+      <div className="sub" style={{ marginBottom: 10 }}>{hdrs === null ? 'Loading columns…' : <>Mandatory columns (*): <b>{hdrs.filter((h) => h.endsWith('*')).map((h) => h.replace(/\*$/, '')).join(', ')}</b> · {hdrs.length} columns in total{hdrs.length > 20 ? ' — fill only what you have, blanks are fine' : ''}</>}</div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <button className="btn btn-ghost" onClick={() => importTemplate(t, notify)}>⬇ Download template</button>
-        <label className="btn btn-teal" style={{ cursor: 'pointer' }}>
+        <label className={`btn btn-teal ${hdrs === null ? 'disabled' : ''}`} style={{ cursor: 'pointer' }}>
           {busy === 'validate' && !rows ? 'Checking…' : '⬆ Upload filled Excel'}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
             onChange={(e) => e.target.files[0] && parseFile(e.target.files[0])} />
@@ -3831,7 +3834,7 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
         {fileName && <span className="chip">{fileName}</span>}
       </div>
 
-      {rows && result && (
+      {rows && result && hdrs && (
         <>
           <div style={{ display: 'flex', gap: 8, margin: '14px 0 8px', flexWrap: 'wrap', alignItems: 'center' }}>
             <span className="chip">{result.counts.total} rows</span>
@@ -3855,7 +3858,7 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
                 <tr>
                   <th style={{ minWidth: 46 }}>Row</th>
                   <th style={{ minWidth: 86 }}>Status</th>
-                  {t.headers.map((h) => (
+                  {hdrs.map((h) => (
                     <th key={h}>{h.endsWith('*') ? <>{h.slice(0, -1)}<span className="req">*</span></> : h}</th>
                   ))}
                   <th style={{ minWidth: 220 }}>Problem</th>
@@ -3865,12 +3868,12 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
                 {rows.slice(0, 300).map((r, i) => {
                   const res = resFor(i);
                   const isErr = res && res.status === 'error';
-                  const errCol = isErr && res.col ? t.headers.find((h) => keyOf(h).includes(keyOf(res.col)) || keyOf(res.col).includes(keyOf(h))) : null;
+                  const errCol = isErr && res.col ? hdrs.find((h) => keyOf(h).includes(keyOf(res.col)) || keyOf(res.col).includes(keyOf(h))) : null;
                   return (
                     <tr key={i} className={isErr ? 'imp-err-row' : ''}>
                       <td className="sub">#{i + 2}</td>
                       <td>{dirty && !committed ? <Pill color="amber">edited</Pill> : stPill(res)}</td>
-                      {t.headers.map((h) => (
+                      {hdrs.map((h) => (
                         <td key={h} className={errCol === h ? 'imp-err-cell' : ''}>
                           <input className="imp-cell" value={r[h] ?? ''} disabled={!!committed}
                             title={errCol === h ? res.message : undefined}
@@ -3918,32 +3921,35 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
   );
 }
 
-/* shared template download */
-function importTemplate(t, notify) {
-  const ws = XLSX.utils.aoa_to_sheet([t.headers, t.sample]);
-  ws['!cols'] = t.headers.map((h) => ({ wch: Math.max(14, h.length + 2) }));
+/* shared template download (column list fetched from the server) */
+async function importTemplate(t, notify) {
+  const def = await getImportDef(t.key);
+  const ws = XLSX.utils.aoa_to_sheet([def.headers, def.sample]);
+  ws['!cols'] = def.headers.map((h) => ({ wch: Math.max(14, String(h).length + 2) }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, t.title.slice(0, 31));
   XLSX.writeFile(wb, `Import_${t.key}_template.xlsx`);
-  notify('Template downloaded — fill it and upload. Columns marked * are mandatory; the sample row shows the format (delete it before importing).');
+  notify(`Template downloaded (${def.headers.length} columns) — fill it and upload. Columns marked * are mandatory; the sample row shows the format (delete it before importing).`);
 }
 
 /* ── Import / Export dropdown for list-page toolbars ───────────────────
    view→import type + export column definitions. Export works for everyone
    who can see the page; import items appear only with edit permission. */
 const EXPORT_DEFS = {
-  units:   { db: 'units',   cols: (d) => [['Code', 'code'], ['Unit', 'name'], ['Asset', (r) => nameOf(d.assets, r.assetId)], ['Floor', 'floor'], ['Builtup (sqft)', 'builtupArea'], ['Carpet (sqft)', 'carpetArea'], ['Card rate', 'cardRate'], ['Type', 'unitType'], ['Status', 'status']] },
+  units:   { db: 'units',   cols: (d) => [['Code', 'code'], ['Unit', 'name'], ['Asset', (r) => nameOf(d.assets, r.assetId)], ['Floor', 'floor'], ['Builtup (sqft)', 'builtupArea'], ['Carpet (sqft)', 'carpetArea'], ['Covered (sqft)', 'coveredArea'], ['Card rate', 'cardRate'], ['PLC', 'plc'], ['Type', 'unitType'], ['Owner', 'owner'], ['Customer', (r) => nameOf(d.customers, r.customerId)], ['Status', 'status']] },
   brands:  { db: 'brands',  cols: () => [['Code', 'code'], ['Brand', 'name'], ['Category', 'category'], ['Billing email', 'email'], ['GSTIN', 'gstin'], ['PAN', 'panNo']] },
   brokers: { db: 'brokers', cols: () => [['Code', 'code'], ['Broker', 'name'], ['Firm', 'firm'], ['Phone', 'phone'], ['Email', 'email'], ['PAN', 'panNo'], ['RERA', 'reraNo']] },
   customers: { db: 'customers', cols: () => [['Code', 'code'], ['Customer', 'name'], ['Type', 'custType'], ['Phone', 'phone'], ['Email', 'email'], ['PAN', 'panNo'], ['GSTIN', 'gstin'], ['NRI', (r) => (r.nri ? 'Yes' : 'No')]] },
   companies: { db: 'companies', cols: () => [['Code', 'code'], ['Company', 'name'], ['PAN', 'panNo'], ['GSTIN', 'gstin']] },
+  assets: { db: 'assets', cols: () => [['Code', 'code'], ['Project', 'name'], ['City', 'city'], ['RERA', 'reraNo'], ['OC Status', 'ocStatus'], ['Landlord', 'landlordName'], ['GSTIN', 'gstin'], ['PAN', 'panNo'], ['Bank', 'bankName'], ['Account', 'bankAcc'], ['IFSC', 'bankIfsc']] },
+  blocks: { db: 'blocks', cols: (d) => [['Code', 'code'], ['Block', 'name'], ['Project', (r) => nameOf(d.assets, r.assetId)], ['Total floors', 'totalFloors']] },
   leases:  { db: 'leases',  cols: (d) => [['Code', 'code'], ['Brand', (r) => nameOf(d.brands, r.brandId)], ['Unit', (r) => nameOf(d.units, r.unitId)], ['Start', 'startDate'], ['End', 'endDate'], ['Type', 'rentalType'], ['MG', 'mg'], ['MG basis', 'mgBasis'], ['RS %', 'revSharePct'], ['CAM', 'cam'], ['Esc %', 'esc'], ['Deposit', 'deposit'], ['GST %', 'gst'], ['Stage', 'lifecycleStage'], ['Approval', 'docStatus']] },
   sales:   { db: 'sales',   cols: (d) => [['Lease', (r) => { const l = findById(d.leases, r.leaseId); return l ? l.code : r.leaseId; }], ['Month', 'ym'], ['Sales', 'amount']] },
   invoices: { db: 'invoices', cols: (d) => [['Invoice', 'no'], ['Type', 'type'], ['Brand', (r) => nameOf(d.brands, r.brandId)], ['Unit', (r) => nameOf(d.units, r.unitId)], ['Month', 'ym'], ['Due', 'dueDate'], ['Taxable', 'amount'], ['GST', 'gstAmt'], ['Total', 'total'], ['Status', 'status'], ['Approval', 'docStatus']] },
   collections: { db: 'collections', cols: (d) => [['Receipt', 'no'], ['Invoice', (r) => { const i = findById(d.invoices, r.invoiceId); return i ? i.no : ''; }], ['Date', 'date'], ['Amount', 'amount'], ['TDS', 'tdsAmt'], ['Instrument', 'instrument'], ['Ref', 'ref'], ['Approval', 'docStatus']] },
   investors: { db: 'investorUnits', cols: (d) => [['Code', 'code'], ['Unit', (r) => nameOf(d.units, r.unitId)], ['Investors', (r) => (r.investors || []).map((x) => `${x.name} (${x.disbursePct}%)`).join('; ')], ['Status', 'status']] }
 };
-const VIEW_IMPORT_KEY = { units: 'units', brands: 'brands', brokers: 'brokers', customers: 'customers', leases: 'leases', sales: 'sales', collections: 'collections', investors: 'investorunits' };
+const VIEW_IMPORT_KEY = { units: 'units', brands: 'brands', brokers: 'brokers', customers: 'customers', companies: 'companies', assets: 'assets', blocks: 'blocks', leases: 'leases', sales: 'sales', collections: 'collections', investors: 'investorunits' };
 
 function ImportExportMenu({ view, db, notify, refresh, actingRole }) {
   const [open, setOpen] = React.useState(false);

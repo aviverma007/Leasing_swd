@@ -8,6 +8,17 @@ const express = require('express');
 const { sql, getPool, SCHEMA } = require('../db');
 const { uid, nextNo, iso } = require('../lib/helpers');
 const { canEdit } = require('../lib/permissions');
+const { LEASE_FIELDS, sqlType } = require('../lib/leaseFields');
+
+/* Lease extra columns handled by the core importer (or replaced by a friendlier column) */
+const LEASE_CORE_COLS = new Set(['LockinMonths', 'RentStartDate', 'BrokerId']);
+function humanCol(col) {
+  let s = col.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  const fix = { 'Loi': 'LOI', 'Rcd': 'RCD', 'Nfa': 'NFA', 'Hsn': 'HSN', 'Psf': 'PSF', 'Cam': 'CAM', 'Lms': 'LMS', 'Hod': 'HOD', 'Tcv': 'TCV', 'Igst': 'IGST', 'Mg': 'MG', 'Sd': 'SD', 'Cd': 'CD', 'Rm': 'RM', 'Spa': 'SPA', 'Json': 'JSON', 'Rs': 'RS' };
+  return s.split(' ').map((w) => fix[w] || w).join(' ');
+}
+const LEASE_EXTRAS = LEASE_FIELDS.filter((f) => !LEASE_CORE_COLS.has(f[1]))
+  .map((f) => ({ f, header: humanCol(f[1]) }));
 const { logAudit, userName } = require('../lib/audit');
 const router = express.Router();
 
@@ -79,15 +90,125 @@ function field(row, ...names) {
 /* ── per-type definitions: module (edit permission), validate(ctx,row), commit(pool,data,by) ── */
 const TYPES = {
 
+  companies: {
+    module: 'companies', label: 'Company',
+    headers: ['Company Name*', 'PAN', 'GSTIN'],
+    sample: ['Adhikaansh Realtors Pvt. Ltd.', 'AABCA1234D', '06AABCA1234D1Z5'],
+    async ctx(pool) {
+      const c = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Companies`);
+      return { companies: makeLookup(c.recordset, 'Name'), seen: new Set() };
+    },
+    validate(ctx, row) {
+      const name = norm(field(row, 'Company Name', 'Company', 'Name'));
+      if (!name) return { error: 'Company Name is required.', col: 'Company Name' };
+      if (ctx.companies.has(name)) return { error: `Company "${name}" already exists.`, col: 'Company Name' };
+      if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}".`, col: 'Company Name' };
+      const pan = norm(field(row, 'PAN'));
+      if (pan && !/^[A-Za-z]{5}\d{4}[A-Za-z]$/.test(pan)) return { error: `"${pan}" is not a valid PAN.`, col: 'PAN' };
+      const gstin = norm(field(row, 'GSTIN'));
+      if (gstin && gstin.length !== 15) return { error: `GSTIN must be 15 characters (got ${gstin.length}).`, col: 'GSTIN' };
+      ctx.seen.add(low(name));
+      return { data: { name, pan, gstin }, summary: name };
+    },
+    async commit(pool, d, by) {
+      const id = uid(); const code = await nextNo(pool, sql, 'CO');
+      await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
+        .input('n', sql.NVarChar(200), d.name).input('p', sql.NVarChar(20), d.pan || null).input('g', sql.NVarChar(20), d.gstin || null)
+        .query(`INSERT INTO ${SCHEMA}.Companies (Id,Code,Name,PanNo,Gstin) VALUES (@id,@code,@n,@p,@g)`);
+      await logAudit(pool, 'companies', id, 'created', `Company ${d.name} created (imported from Excel)`, by);
+      return code;
+    }
+  },
+
+  assets: {
+    module: 'assets', label: 'Project',
+    headers: ['Project Name*', 'City', 'RERA No', 'OC Status', 'Landlord Name', 'Landlord Address', 'GSTIN', 'PAN', 'Bank Name', 'Bank Branch', 'Bank Account', 'IFSC', 'MICR'],
+    sample: ['Gems-2 Commercial, Sec-89', 'Gurugram', 'RERA-GGM-0000-2026', 'Received', 'Adhikaansh Realtors Pvt. Ltd.', 'Sector 89, Gurugram', '06AABCA1234D1Z5', 'AABCA1234D', 'HDFC Bank', 'Sector 29', '50100222333', 'HDFC0000123', ''],
+    async ctx(pool) {
+      const a = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Assets`);
+      return { assets: makeLookup(a.recordset, 'Name'), seen: new Set() };
+    },
+    validate(ctx, row) {
+      const name = norm(field(row, 'Project Name', 'Project', 'Asset', 'Name'));
+      if (!name) return { error: 'Project Name is required.', col: 'Project Name' };
+      if (ctx.assets.has(name)) return { error: `Project "${name}" already exists.`, col: 'Project Name' };
+      if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}".`, col: 'Project Name' };
+      const pan = norm(field(row, 'PAN'));
+      if (pan && !/^[A-Za-z]{5}\d{4}[A-Za-z]$/.test(pan)) return { error: `"${pan}" is not a valid PAN.`, col: 'PAN' };
+      const gstin = norm(field(row, 'GSTIN'));
+      if (gstin && gstin.length !== 15) return { error: `GSTIN must be 15 characters (got ${gstin.length}).`, col: 'GSTIN' };
+      const ifsc = norm(field(row, 'IFSC'));
+      if (ifsc && !/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(ifsc)) return { error: `"${ifsc}" is not a valid IFSC.`, col: 'IFSC' };
+      ctx.seen.add(low(name));
+      return { data: { name, city: norm(field(row, 'City')), rera: norm(field(row, 'RERA No', 'RERA')), oc: norm(field(row, 'OC Status')),
+        lname: norm(field(row, 'Landlord Name')), laddr: norm(field(row, 'Landlord Address')), gstin, pan,
+        bank: norm(field(row, 'Bank Name')), branch: norm(field(row, 'Bank Branch')), acc: norm(field(row, 'Bank Account', 'Account No')), ifsc, micr: norm(field(row, 'MICR')) },
+        summary: `${name}${norm(field(row, 'City')) ? ' · ' + norm(field(row, 'City')) : ''}` };
+    },
+    async commit(pool, d, by) {
+      const id = uid(); const code = await nextNo(pool, sql, 'AST');
+      await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
+        .input('n', sql.NVarChar(200), d.name).input('c', sql.NVarChar(100), d.city || null)
+        .input('r', sql.NVarChar(80), d.rera || null).input('oc', sql.NVarChar(60), d.oc || null)
+        .input('ln', sql.NVarChar(200), d.lname || null).input('la', sql.NVarChar(400), d.laddr || null)
+        .input('g', sql.NVarChar(20), d.gstin || null).input('p', sql.NVarChar(20), d.pan || null)
+        .input('bk', sql.NVarChar(120), d.bank || null).input('bb', sql.NVarChar(120), d.branch || null)
+        .input('ac', sql.NVarChar(40), d.acc || null).input('if', sql.NVarChar(20), d.ifsc || null).input('mi', sql.NVarChar(20), d.micr || null)
+        .query(`INSERT INTO ${SCHEMA}.Assets (Id,Code,Name,City,ReraNo,OcStatus,LandlordName,LandlordAddress,Gstin,PanNo,BankName,BankBranch,BankAcc,BankIfsc,BankMicr)
+                VALUES (@id,@code,@n,@c,@r,@oc,@ln,@la,@g,@p,@bk,@bb,@ac,@if,@mi)`);
+      await logAudit(pool, 'assets', id, 'created', `Project ${d.name} created (imported from Excel)`, by);
+      return code;
+    }
+  },
+
+  blocks: {
+    module: 'blocks', label: 'Block',
+    headers: ['Block Name*', 'Project*', 'Total Floors'],
+    sample: ['Ground Floor', 'Gems-2 Commercial, Sec-89', 1],
+    async ctx(pool) {
+      const [b, a] = await Promise.all([
+        pool.request().query(`SELECT b.Id, b.Name, b.AssetId FROM ${SCHEMA}.Blocks b`),
+        pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Assets`)
+      ]);
+      return { blocks: b.recordset, assets: makeLookup(a.recordset, 'Name'), seen: new Set() };
+    },
+    validate(ctx, row) {
+      const name = norm(field(row, 'Block Name', 'Block', 'Name'));
+      if (!name) return { error: 'Block Name is required.', col: 'Block Name' };
+      const projName = norm(field(row, 'Project', 'Asset'));
+      if (!projName) return { error: 'Project is required.', col: 'Project' };
+      const a = ctx.assets.get(projName);
+      if (!a) { const sg = ctx.assets.suggest(projName); return { error: `Project "${projName}" not found${sg ? ` — did you mean "${sg}"?` : '.'}`, col: 'Project' }; }
+      if (ctx.blocks.some((b) => b.AssetId === a.Id && low(b.Name) === low(name))) return { error: `Block "${name}" already exists in ${projName}.`, col: 'Block Name' };
+      const key = a.Id + '|' + low(name);
+      if (ctx.seen.has(key)) return { error: `Duplicate in file: block "${name}" in ${projName}.`, col: 'Block Name' };
+      const fl = num(field(row, 'Total Floors'));
+      if (Number.isNaN(fl)) return { error: 'Total Floors is not a number.', col: 'Total Floors' };
+      ctx.seen.add(key);
+      return { data: { name, assetId: a.Id, floors: fl || 1 }, summary: `${name} @ ${projName}` };
+    },
+    async commit(pool, d, by) {
+      const id = uid(); const code = await nextNo(pool, sql, 'BLK');
+      await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
+        .input('n', sql.NVarChar(200), d.name).input('a', sql.VarChar(40), d.assetId).input('f', sql.Int, d.floors)
+        .query(`INSERT INTO ${SCHEMA}.Blocks (Id,Code,Name,AssetId,TotalFloors) VALUES (@id,@code,@n,@a,@f)`);
+      await logAudit(pool, 'blocks', id, 'created', `Block ${d.name} created (imported from Excel)`, by);
+      return code;
+    }
+  },
+
   units: {
     module: 'units', label: 'Unit',
+    headers: ['Unit Name*', 'Asset', 'Block', 'Floor', 'Builtup Area (sqft)', 'Carpet Area (sqft)', 'Covered Area (sqft)', 'Card Rate (Rs/sqft)', 'PLC', 'Unit Type', 'Owner', 'Customer (owner)', 'Status'],
+    sample: ['G-21', 'Gems-2 Commercial, Sec-89', '', 0, 1131.64, 905.31, 0, 145, '', 'Retail', '', '', 'Vacant'],
     async ctx(pool) {
-      const [u, a, b] = await Promise.all([
+      const [u, a, b, c] = await Promise.all([
         pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Units`),
         pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Assets`),
-        pool.request().query(`SELECT Id, Name, AssetId FROM ${SCHEMA}.Blocks`)
+        pool.request().query(`SELECT Id, Name, AssetId FROM ${SCHEMA}.Blocks`),
+        pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Customers`)
       ]);
-      return { units: makeLookup(u.recordset, 'Name'), assets: makeLookup(a.recordset, 'Name'), blocks: makeLookup(b.recordset, 'Name'), assetRows: a.recordset, seen: new Set() };
+      return { units: makeLookup(u.recordset, 'Name'), assets: makeLookup(a.recordset, 'Name'), blocks: makeLookup(b.recordset, 'Name'), customers: makeLookup(c.recordset, 'Name'), assetRows: a.recordset, seen: new Set() };
     },
     validate(ctx, row) {
       const name = norm(field(row, 'Unit Name', 'Unit', 'Name'));
@@ -106,25 +227,35 @@ const TYPES = {
       if (blockName) { const b = ctx.blocks.get(blockName); if (!b) return { error: `Block "${blockName}" not found.`, col: 'Block' }; blockId = b.Id; }
       const builtup = num(field(row, 'Builtup Area (sqft)', 'Builtup Area', 'Builtup'));
       const carpet = num(field(row, 'Carpet Area (sqft)', 'Carpet Area', 'Carpet'));
+      const covered = num(field(row, 'Covered Area (sqft)', 'Covered Area', 'Covered'));
       const card = num(field(row, 'Card Rate (Rs/sqft)', 'Card Rate', 'CardRate'));
-      for (const [v, l] of [[builtup, 'Builtup Area'], [carpet, 'Carpet Area'], [card, 'Card Rate']]) {
+      const plc = num(field(row, 'PLC'));
+      const custName = norm(field(row, 'Customer (owner)', 'Customer'));
+      let customerId = null;
+      if (custName) {
+        const cu = ctx.customers.get(custName);
+        if (!cu) { const sg = ctx.customers.suggest(custName); return { error: `Customer "${custName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import customers first.'}`, col: 'Customer (owner)' }; }
+        customerId = cu.Id;
+      }
+      for (const [v, l] of [[builtup, 'Builtup Area'], [carpet, 'Carpet Area'], [covered, 'Covered Area'], [card, 'Card Rate'], [plc, 'PLC']]) {
         if (Number.isNaN(v)) return { error: `${l} is not a number.`, col: l };
         if (v != null && v < 0) return { error: `${l} cannot be negative.`, col: l };
       }
       const status = norm(field(row, 'Status')) || 'Vacant';
       if (!['Vacant', 'Leased', 'Blocked'].includes(status)) return { error: `Status must be Vacant, Leased or Blocked (got "${status}").`, col: 'Status' };
       ctx.seen.add(low(name));
-      return { data: { name, assetId, blockId, floor: num(field(row, 'Floor')) || 0, builtup, carpet, card, unitType: norm(field(row, 'Unit Type')), owner: norm(field(row, 'Owner')), status }, summary: `${name}${card ? ` · card ₹${card}/sqft` : ''}` };
+      return { data: { name, assetId, blockId, floor: num(field(row, 'Floor')) || 0, builtup, carpet, covered, card, plc, customerId, unitType: norm(field(row, 'Unit Type')), owner: norm(field(row, 'Owner')), status }, summary: `${name}${card ? ` · card ₹${card}/sqft` : ''}` };
     },
     async commit(pool, d, by) {
       const id = uid(); const code = await nextNo(pool, sql, 'UNT');
       await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
         .input('n', sql.NVarChar(200), d.name).input('a', sql.VarChar(40), d.assetId).input('b', sql.VarChar(40), d.blockId)
         .input('f', sql.Int, d.floor).input('bu', sql.Decimal(18, 2), d.builtup).input('ca', sql.Decimal(18, 2), d.carpet)
-        .input('cr', sql.Decimal(18, 2), d.card).input('ut', sql.NVarChar(80), d.unitType || null)
+        .input('cr', sql.Decimal(18, 2), d.card).input('cv', sql.Decimal(18, 2), d.covered).input('plc', sql.Decimal(18, 2), d.plc)
+        .input('cu', sql.VarChar(40), d.customerId).input('ut', sql.NVarChar(80), d.unitType || null)
         .input('ow', sql.NVarChar(150), d.owner || null).input('st', sql.VarChar(20), d.status)
-        .query(`INSERT INTO ${SCHEMA}.Units (Id,Code,Name,AssetId,BlockId,Floor,BuiltupArea,CarpetArea,CardRate,UnitType,Owner,Status)
-                VALUES (@id,@code,@n,@a,@b,@f,@bu,@ca,@cr,@ut,@ow,@st)`);
+        .query(`INSERT INTO ${SCHEMA}.Units (Id,Code,Name,AssetId,BlockId,Floor,BuiltupArea,CarpetArea,CoveredArea,CardRate,Plc,CustomerId,UnitType,Owner,Status)
+                VALUES (@id,@code,@n,@a,@b,@f,@bu,@ca,@cv,@cr,@plc,@cu,@ut,@ow,@st)`);
       await logAudit(pool, 'units', id, 'created', `Unit ${d.name} created (imported from Excel)`, by);
       return code;
     }
@@ -132,9 +263,14 @@ const TYPES = {
 
   brands: {
     module: 'brands', label: 'Brand',
+    headers: ['Brand Name*', 'Company (lessee entity)', 'Category', 'Billing Email', 'GSTIN', 'PAN', 'Regular Address', 'Registered Address'],
+    sample: ['Blue Tokai', 'Adhikaansh Realtors Pvt. Ltd.', 'F&B', 'accounts@bluetokai.com', '06AABCU9603R1ZV', 'AABCU9603R', 'Gurugram', 'New Delhi'],
     async ctx(pool) {
-      const b = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Brands`);
-      return { brands: makeLookup(b.recordset, 'Name'), seen: new Set() };
+      const [b, c] = await Promise.all([
+        pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Brands`),
+        pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Companies`)
+      ]);
+      return { brands: makeLookup(b.recordset, 'Name'), companies: makeLookup(c.recordset, 'Name'), seen: new Set() };
     },
     validate(ctx, row) {
       const name = norm(field(row, 'Brand Name', 'Brand', 'Name'));
@@ -147,16 +283,23 @@ const TYPES = {
       if (gstin && gstin.length !== 15) return { error: `GSTIN must be 15 characters (got ${gstin.length}).`, col: 'GSTIN' };
       const pan = norm(field(row, 'PAN'));
       if (pan && !/^[A-Za-z]{5}\d{4}[A-Za-z]$/.test(pan)) return { error: `"${pan}" is not a valid PAN.`, col: 'PAN' };
+      const compName = norm(field(row, 'Company (lessee entity)', 'Company'));
+      let companyId = null;
+      if (compName) {
+        const co = ctx.companies.get(compName);
+        if (!co) { const sg = ctx.companies.suggest(compName); return { error: `Company "${compName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import companies first.'}`, col: 'Company (lessee entity)' }; }
+        companyId = co.Id;
+      }
       ctx.seen.add(low(name));
-      return { data: { name, category: norm(field(row, 'Category')), email, gstin, pan, address: norm(field(row, 'Address')) }, summary: `${name}${email ? ' · ' + email : ''}` };
+      return { data: { name, companyId, category: norm(field(row, 'Category')), email, gstin, pan, regAddress: norm(field(row, 'Regular Address')), address: norm(field(row, 'Registered Address', 'Address')) }, summary: `${name}${email ? ' · ' + email : ''}` };
     },
     async commit(pool, d, by) {
       const id = uid(); const code = await nextNo(pool, sql, 'BRD');
       await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
-        .input('n', sql.NVarChar(200), d.name).input('c', sql.NVarChar(100), d.category || null)
+        .input('n', sql.NVarChar(200), d.name).input('co', sql.VarChar(40), d.companyId).input('c', sql.NVarChar(100), d.category || null)
         .input('e', sql.NVarChar(200), d.email || null).input('g', sql.NVarChar(20), d.gstin || null)
-        .input('p', sql.NVarChar(20), d.pan || null).input('ad', sql.NVarChar(400), d.address || null)
-        .query(`INSERT INTO ${SCHEMA}.Brands (Id,Code,Name,Category,Email,Gstin,PanNo,Address) VALUES (@id,@code,@n,@c,@e,@g,@p,@ad)`);
+        .input('p', sql.NVarChar(20), d.pan || null).input('ra', sql.NVarChar(400), d.regAddress || null).input('ad', sql.NVarChar(400), d.address || null)
+        .query(`INSERT INTO ${SCHEMA}.Brands (Id,Code,Name,CompanyId,Category,Email,Gstin,PanNo,RegularAddress,Address) VALUES (@id,@code,@n,@co,@c,@e,@g,@p,@ra,@ad)`);
       await logAudit(pool, 'brands', id, 'created', `Brand ${d.name} created (imported from Excel)`, by);
       return code;
     }
@@ -164,6 +307,8 @@ const TYPES = {
 
   brokers: {
     module: 'brands', label: 'Broker',
+    headers: ['Broker Name*', 'Firm', 'Phone', 'Email', 'PAN', 'GSTIN', 'RERA No'],
+    sample: ['Rahul Khanna', 'RK Realty', '98100 00000', 'rahul@rkrealty.in', 'AAAPK1234K', '', ''],
     async ctx(pool) {
       const b = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Brokers`);
       return { brokers: makeLookup(b.recordset, 'Name'), seen: new Set() };
@@ -173,16 +318,18 @@ const TYPES = {
       if (!name) return { error: 'Broker Name is required.', col: 'Broker Name' };
       if (ctx.brokers.has(name)) return { error: `Broker "${name}" already exists.`, col: 'Broker Name' };
       if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}".` };
+      const gstin = norm(field(row, 'GSTIN'));
+      if (gstin && gstin.length !== 15) return { error: `GSTIN must be 15 characters (got ${gstin.length}).`, col: 'GSTIN' };
       ctx.seen.add(low(name));
-      return { data: { name, firm: norm(field(row, 'Firm')), phone: norm(field(row, 'Phone')), email: norm(field(row, 'Email')), pan: norm(field(row, 'PAN')), rera: norm(field(row, 'RERA No', 'RERA')) }, summary: name };
+      return { data: { name, firm: norm(field(row, 'Firm')), phone: norm(field(row, 'Phone')), email: norm(field(row, 'Email')), pan: norm(field(row, 'PAN')), gstin, rera: norm(field(row, 'RERA No', 'RERA')) }, summary: name };
     },
     async commit(pool, d, by) {
       const id = uid(); const code = await nextNo(pool, sql, 'BRK');
       await pool.request().input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
         .input('n', sql.NVarChar(200), d.name).input('f', sql.NVarChar(200), d.firm || null)
         .input('ph', sql.NVarChar(40), d.phone || null).input('e', sql.NVarChar(200), d.email || null)
-        .input('p', sql.NVarChar(20), d.pan || null).input('r', sql.NVarChar(60), d.rera || null)
-        .query(`INSERT INTO ${SCHEMA}.Brokers (Id,Code,Name,Firm,Phone,Email,PanNo,ReraNo,Active) VALUES (@id,@code,@n,@f,@ph,@e,@p,@r,1)`);
+        .input('p', sql.NVarChar(20), d.pan || null).input('g', sql.NVarChar(20), d.gstin || null).input('r', sql.NVarChar(60), d.rera || null)
+        .query(`INSERT INTO ${SCHEMA}.Brokers (Id,Code,Name,Firm,Phone,Email,PanNo,Gstin,ReraNo,Active) VALUES (@id,@code,@n,@f,@ph,@e,@p,@g,@r,1)`);
       await logAudit(pool, 'brokers', id, 'created', `Broker ${d.name} created (imported from Excel)`, by);
       return code;
     }
@@ -190,6 +337,8 @@ const TYPES = {
 
   customers: {
     module: 'units', label: 'Customer',
+    headers: ['Customer Name*', 'Type', 'Phone', 'Email', 'PAN', 'GSTIN', 'Address', 'NRI (Yes/No)', 'Bank Name', 'Account No', 'IFSC', 'Remarks'],
+    sample: ['Juhi Nagar', 'Individual', '98100 11111', 'juhi@gmail.com', 'AAAPN1111A', '', 'Delhi', 'No', 'HDFC Bank', '50100222333', 'HDFC0000123', ''],
     async ctx(pool) {
       const c = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Customers`);
       return { customers: makeLookup(c.recordset, 'Name'), seen: new Set() };
@@ -200,7 +349,9 @@ const TYPES = {
       if (ctx.customers.has(name)) return { error: `Customer "${name}" already exists.`, col: 'Customer Name' };
       if (ctx.seen.has(low(name))) return { error: `Duplicate in file: "${name}".` };
       ctx.seen.add(low(name));
-      return { data: { name, custType: norm(field(row, 'Type', 'Customer Type')), phone: norm(field(row, 'Phone')), email: norm(field(row, 'Email')), pan: norm(field(row, 'PAN')), gstin: norm(field(row, 'GSTIN')), address: norm(field(row, 'Address')), nri: yesNo(field(row, 'NRI (Yes/No)', 'NRI')) }, summary: name };
+      const ifsc = norm(field(row, 'IFSC'));
+      if (ifsc && !/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(ifsc)) return { error: `"${ifsc}" is not a valid IFSC.`, col: 'IFSC' };
+      return { data: { name, custType: norm(field(row, 'Type', 'Customer Type')), phone: norm(field(row, 'Phone')), email: norm(field(row, 'Email')), pan: norm(field(row, 'PAN')), gstin: norm(field(row, 'GSTIN')), address: norm(field(row, 'Address')), nri: yesNo(field(row, 'NRI (Yes/No)', 'NRI')), bank: norm(field(row, 'Bank Name')), acc: norm(field(row, 'Account No', 'Account')), ifsc, remarks: norm(field(row, 'Remarks')) }, summary: name };
     },
     async commit(pool, d, by) {
       const id = uid(); const code = await nextNo(pool, sql, 'CUS');
@@ -209,7 +360,8 @@ const TYPES = {
         .input('ph', sql.NVarChar(40), d.phone || null).input('e', sql.NVarChar(200), d.email || null)
         .input('p', sql.NVarChar(20), d.pan || null).input('g', sql.NVarChar(20), d.gstin || null)
         .input('ad', sql.NVarChar(400), d.address || null).input('nri', sql.Bit, d.nri ? 1 : 0)
-        .query(`INSERT INTO ${SCHEMA}.Customers (Id,Code,Name,CustType,Phone,Email,PanNo,Gstin,Address,Nri,Active) VALUES (@id,@code,@n,@t,@ph,@e,@p,@g,@ad,@nri,1)`);
+        .input('bk', sql.NVarChar(120), d.bank || null).input('ac', sql.NVarChar(40), d.acc || null).input('if', sql.NVarChar(20), d.ifsc || null).input('rm', sql.NVarChar(400), d.remarks || null)
+        .query(`INSERT INTO ${SCHEMA}.Customers (Id,Code,Name,CustType,Phone,Email,PanNo,Gstin,Address,Nri,BankName,BankAcc,BankIfsc,Remarks,Active) VALUES (@id,@code,@n,@t,@ph,@e,@p,@g,@ad,@nri,@bk,@ac,@if,@rm,1)`);
       await logAudit(pool, 'customers', id, 'created', `Customer ${d.name} created (imported from Excel)`, by);
       return code;
     }
@@ -217,6 +369,8 @@ const TYPES = {
 
   sales: {
     module: 'sales', label: 'Sales entry',
+    headers: ['Lease Code*', 'Month (YYYY-MM)*', 'Sales Amount*'],
+    sample: ['LSE-0047', '2026-10', 5400000],
     async ctx(pool) {
       const l = await pool.request().query(`SELECT Id, Code, RentalType, Status FROM ${SCHEMA}.Leases`);
       return { leases: makeLookup(l.recordset, 'Code'), seen: new Set() };
@@ -257,6 +411,8 @@ const TYPES = {
 
   collections: {
     module: 'collections', label: 'Receipt',
+    headers: ['Invoice No*', 'Date (YYYY-MM-DD)*', 'Amount*', 'TDS %', 'Instrument (NEFT/Cheque)', 'Reference (UTR/Cheque No)'],
+    sample: ['INV-0112', '2026-11-15', 43937.51, 10, 'NEFT', 'UTR9988776655'],
     async ctx(pool) {
       const i = await pool.request().query(`SELECT Id, No, Total, DocStatus FROM ${SCHEMA}.Invoices`);
       const refs = await pool.request().query(`SELECT Ref FROM ${SCHEMA}.Collections WHERE Ref IS NOT NULL AND Ref <> ''`);
@@ -301,12 +457,21 @@ const TYPES = {
 
   leases: {
     module: 'leases', label: 'Lease',
+    get headers() {
+      return ['Brand Name*', 'Unit Name*', 'Start Date*', 'End Date*', 'Rental Type', 'MG', 'MG Basis (PerSqFt/Lumpsum)', 'Rev Share %', 'CAM (Rs/sqft)', 'Utility (Rs/sqft)', 'Escalation %', 'Deposit', 'GST %', 'Lock-in Months', 'Rent Start Date (optional)', 'Broker',
+        ...LEASE_EXTRAS.map((x) => x.header)];
+    },
+    get sample() {
+      return ['Blue Tokai', 'K-06', '2026-04-01', '2029-03-31', 'MG', 129.78, 'PerSqFt', '', 20, 0, 5, 111706, 18, 36, '2026-04-15', '',
+        ...LEASE_EXTRAS.map((x) => (x.f[2] === 'date' ? '' : x.f[2] === 'str' ? '' : ''))];
+    },
     async ctx(pool) {
-      const [b, u] = await Promise.all([
+      const [b, u, br] = await Promise.all([
         pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Brands`),
-        pool.request().query(`SELECT Id, Name, AssetId, Status FROM ${SCHEMA}.Units`)
+        pool.request().query(`SELECT Id, Name, AssetId, Status FROM ${SCHEMA}.Units`),
+        pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Brokers`)
       ]);
-      return { brands: makeLookup(b.recordset, 'Name'), units: makeLookup(u.recordset, 'Name'), seen: new Set() };
+      return { brands: makeLookup(b.recordset, 'Name'), units: makeLookup(u.recordset, 'Name'), brokers: makeLookup(br.recordset, 'Name'), seen: new Set() };
     },
     validate(ctx, row) {
       const brandName = norm(field(row, 'Brand Name', 'Brand'));
@@ -338,20 +503,49 @@ const TYPES = {
       }
       const rentStart = parseDate(field(row, 'Rent Start Date (optional)', 'Rent Start Date', 'RCD'));
       if (Number.isNaN(rentStart)) return { error: 'Rent Start Date is not a valid date.', col: 'Rent Start Date' };
+      /* broker by name (optional) */
+      const brokerName = norm(field(row, 'Broker', 'Channel Partner Name'));
+      let brokerId = null;
+      if (brokerName) {
+        const bk = ctx.brokers.get(brokerName);
+        if (!bk) { const sg = ctx.brokers.suggest(brokerName); return { error: `Broker "${brokerName}" not found${sg ? ` — did you mean "${sg}"?` : ' — import brokers first.'}`, col: 'Broker' }; }
+        brokerId = bk.Id;
+      }
+      /* every remaining wizard field — parsed by its declared type, error pinned to its column */
+      const extras = {};
+      for (const { f, header } of LEASE_EXTRAS) {
+        const [, colName, type] = f;
+        const raw = field(row, header, colName);
+        if (raw === undefined || raw === null || norm(raw) === '') continue;
+        if (type === 'date') {
+          const dv = parseDate(raw);
+          if (Number.isNaN(dv)) return { error: `${header} "${norm(raw)}" is not a valid date.`, col: header };
+          extras[colName] = dv;
+        } else if (type === 'dec' || type === 'int') {
+          let nv;
+          if (colName === 'IgstApplicable') nv = yesNo(raw) ? 1 : (['no', 'n', 'false', '0'].includes(low(raw)) ? 0 : num(raw));
+          else nv = num(raw);
+          if (nv == null || Number.isNaN(nv)) return { error: `${header} is not a number.`, col: header };
+          extras[colName] = type === 'int' ? Math.round(nv) : nv;
+        } else {
+          extras[colName] = norm(raw);
+        }
+      }
       return {
         data: {
           brandId: brand.Id, unitId: unit.Id, assetId: unit.AssetId, brandName: brand.Name, unitName: unit.Name,
           start, end, rentalType: RT, mg, mgBasis, rs,
           cam: num(field(row, 'CAM (Rs/sqft)', 'CAM')) || 0, utility: num(field(row, 'Utility (Rs/sqft)', 'Utility')) || 0,
           esc: num(field(row, 'Escalation %', 'Esc %')) || 0, deposit: num(field(row, 'Deposit')) || 0,
-          gst: num(field(row, 'GST %')) ?? 18, lockin: num(field(row, 'Lock-in Months', 'Lockin')) || 0, rentStart
+          gst: num(field(row, 'GST %')) ?? 18, lockin: num(field(row, 'Lock-in Months', 'Lockin')) || 0, rentStart,
+          brokerId, extras
         },
         summary: `${brand.Name} @ ${unit.Name} · ${RT} · ${start} → ${end}`
       };
     },
     async commit(pool, d, by) {
       const id = uid(); const code = await nextNo(pool, sql, 'LSE');
-      await pool.request()
+      const req2 = pool.request()
         .input('id', sql.VarChar(40), id).input('code', sql.VarChar(20), code)
         .input('b', sql.VarChar(40), d.brandId).input('u', sql.VarChar(40), d.unitId).input('a', sql.VarChar(40), d.assetId)
         .input('s', sql.Date, d.start).input('e', sql.Date, d.end)
@@ -360,9 +554,20 @@ const TYPES = {
         .input('cam', sql.Decimal(18, 2), d.cam).input('ut', sql.Decimal(18, 2), d.utility)
         .input('esc', sql.Decimal(9, 3), d.esc).input('dep', sql.Decimal(18, 2), d.deposit)
         .input('gst', sql.Decimal(9, 3), d.gst).input('lk', sql.Int, d.lockin)
-        .input('rsd', sql.Date, d.rentStart || null).input('by', sql.NVarChar(150), by)
-        .query(`INSERT INTO ${SCHEMA}.Leases (Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,LockinMonths,RentStartDate,OnHold,Status,LifecycleStage,DocStatus,SubmittedBy,SubmittedAt,CreatedBy,CreatedAt)
-                VALUES (@id,@code,@b,@u,@a,@s,@e,@rt,@mb,@mg,@rs,@cam,@ut,@esc,@dep,@gst,@lk,@rsd,0,'Active','Active','Pending',@by,SYSDATETIME(),@by,SYSDATETIME())`);
+        .input('rsd', sql.Date, d.rentStart || null).input('bkid', sql.VarChar(40), d.brokerId).input('by', sql.NVarChar(150), by);
+      /* dynamic extra columns from the wizard field list */
+      const xCols = [], xVals = [];
+      let xi = 0;
+      for (const { f } of LEASE_EXTRAS) {
+        const [, colName] = f;
+        if (!(colName in (d.extras || {}))) continue;
+        if (colName === 'BrokerId') continue;
+        const p = 'x' + (xi++);
+        req2.input(p, sqlType(f), d.extras[colName]);
+        xCols.push(colName); xVals.push('@' + p);
+      }
+      await req2.query(`INSERT INTO ${SCHEMA}.Leases (Id,Code,BrandId,UnitId,AssetId,StartDate,EndDate,RentalType,MgBasis,Mg,RevSharePct,Cam,Utility,Esc,Deposit,Gst,LockinMonths,RentStartDate,BrokerId,OnHold,Status,LifecycleStage,DocStatus,SubmittedBy,SubmittedAt,CreatedBy,CreatedAt${xCols.length ? ',' + xCols.join(',') : ''})
+                VALUES (@id,@code,@b,@u,@a,@s,@e,@rt,@mb,@mg,@rs,@cam,@ut,@esc,@dep,@gst,@lk,@rsd,@bkid,0,'Active','Active','Pending',@by,SYSDATETIME(),@by,SYSDATETIME()${xVals.length ? ',' + xVals.join(',') : ''})`);
       await pool.request().input('u', sql.VarChar(40), d.unitId).query(`UPDATE ${SCHEMA}.Units SET Status='Leased' WHERE Id=@u`);
       await logAudit(pool, 'leases', id, 'created', `Lease ${code} — ${d.brandName} @ ${d.unitName} (imported from Excel) — pending approval`, by);
       return code;
@@ -371,6 +576,8 @@ const TYPES = {
 
   investorunits: {
     module: 'investors', label: 'Investor unit',
+    headers: ['Unit Name*', 'Investor Name*', 'Area %', 'Disburse %*', 'NRI (Yes/No)', 'Bank', 'Account No', 'IFSC'],
+    sample: ['K-06', 'Juhi Nagar', 100, 100, 'No', 'HDFC Bank', '50100222333', 'HDFC0000123'],
     async ctx(pool) {
       const [u, iu] = await Promise.all([
         pool.request().query(`SELECT Id, Name, Floor FROM ${SCHEMA}.Units`),
@@ -428,6 +635,11 @@ const TYPES = {
     }
   }
 };
+
+/* ── template/column definitions: the single source of truth for the UI ── */
+router.get('/defs', (req, res) => {
+  res.json(Object.entries(TYPES).map(([key, t]) => ({ key, label: t.label, headers: t.headers || [], sample: t.sample || [] })));
+});
 
 /* ── upload history ──────────────────────────────────────────────────── */
 router.get('/history', async (req, res) => {

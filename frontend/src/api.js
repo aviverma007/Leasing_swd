@@ -171,6 +171,7 @@ export const api = {
   stats: { workspace: () => req('GET', '/stats/workspace') },
   importer: {
     run: (type, rows, commit, fileName) => req('POST', `/import/${type}`, { rows, commit, fileName }),
-    history: (type) => req('GET', '/import/history' + (type ? `?type=${type}` : ''))
+    history: (type) => req('GET', '/import/history' + (type ? `?type=${type}` : '')),
+    defs: () => req('GET', '/import/defs')
   }
 };
