@@ -3921,15 +3921,37 @@ function ImportPanel({ t, notify, refresh, showHistory = true }) {
   );
 }
 
-/* shared template download (column list fetched from the server) */
+/* shared template download (column list fetched from the server).
+   Sheet 1 = headers + a fully-filled sample row. Sheet 2 = Read Me: every column
+   explained — mandatory or not, format, and which names must EXACTLY match the app. */
 async function importTemplate(t, notify) {
   const def = await getImportDef(t.key);
   const ws = XLSX.utils.aoa_to_sheet([def.headers, def.sample]);
   ws['!cols'] = def.headers.map((h) => ({ wch: Math.max(14, String(h).length + 2) }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, t.title.slice(0, 31));
+  const guide = [
+    [`HOW TO FILL — Import ${t.title}`],
+    [''],
+    ['1. Row 2 of the first sheet is a SAMPLE — replace it with your data (or delete it). Add one row per record below the header.'],
+    ['2. Do NOT rename, delete or reorder the header row — the uploader matches columns by these names.'],
+    ['3. Columns marked * are MANDATORY. Everything else may be left blank.'],
+    ['4. Names of existing records (brand, unit, project, company, broker, customer, lease code, invoice no) must EXACTLY match the application — copy-paste them from the app or from an Export of that page. Close matches get a "did you mean…?" hint on upload.'],
+    ['5. Dates: YYYY-MM-DD or DD/MM/YYYY. Numbers: no ₹ symbol; Indian commas (54,00,000) are fine. Yes/No columns take Yes or No.'],
+    ['6. Nothing is saved on upload — you will see every row checked on screen, can fix red cells right there, and only then click Import.'],
+    [''],
+    ['COLUMN', 'MANDATORY?', 'WHAT TO ENTER'],
+    ...def.headers.map((h, i) => {
+      const note = String((def.notes || [])[i] || '');
+      const mand = h.endsWith('*') || /^MANDATORY/i.test(note) ? 'YES' : (/^Needed/i.test(note) ? note.split('·')[0].trim() : 'no');
+      return [h.replace(/\*$/, ''), mand, note.replace(/^(MANDATORY|Optional|Needed[^·]*)\s*·\s*/i, '')];
+    })
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(guide);
+  ws2['!cols'] = [{ wch: 34 }, { wch: 16 }, { wch: 95 }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Read Me');
   XLSX.writeFile(wb, `Import_${t.key}_template.xlsx`);
-  notify(`Template downloaded (${def.headers.length} columns) — fill it and upload. Columns marked * are mandatory; the sample row shows the format (delete it before importing).`);
+  notify(`Template downloaded (${def.headers.length} columns, sample row filled) — see the "Read Me" sheet inside for what each column takes.`);
 }
 
 /* ── Import / Export dropdown for list-page toolbars ───────────────────

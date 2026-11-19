@@ -19,6 +19,63 @@ function humanCol(col) {
 }
 const LEASE_EXTRAS = LEASE_FIELDS.filter((f) => !LEASE_CORE_COLS.has(f[1]))
   .map((f) => ({ f, header: humanCol(f[1]) }));
+
+/* curated sample values for the lease template's extra columns (defaults by type otherwise) */
+const LEASE_SAMPLES = {
+  BookingDate: '2026-01-15', LoiDate: '2026-02-01', LeasingHod: 'Rohit Malhotra', BrandStatus: 'Confirmed',
+  ConsentStatus: 'Received', Lms: 'LMS-00123', PhysicalPossessionStatus: 'Handed over', HandoverStatus: 'Done',
+  Tcv: 12500000, CalledIncludingTax: 0, AvailableFor: 'Retail', CdStatus: 'Executed', CdExecutionDate: '2026-03-01',
+  RegistrationStatus: 'Registered', AgreementRegistrationDate: '2026-03-20', AgreementStatus: 'Signed',
+  DealStatus: 'Closed', SignedAgreementDate: '2026-03-15', AgreementConsultant: 'LegalCo LLP', RmName: 'Priya Shah',
+  CustomerDocRemarks: 'KYC complete', StandardRemarks: '', DetailedRemarks: '', ChequeClearanceDate: '2026-03-25',
+  DealApprovalDate: '2026-02-20', AgreementSignedBrand: 'Yes', AgreementSignedInvestor: 'Yes',
+  DocLeaseCommencementDate: '2026-04-01', ActualHandoverDate: '2026-04-05', DocOperationalDate: '2026-06-01',
+  ActualOperationalDate: '2026-06-10', DocRentCommencementDate: '2026-04-15', ActualRcdDate: '2026-04-15',
+  ChannelPartner: 'RK Realty', Stage: 'Active', OperationalStatus: 'Operational', PercentWork: 100,
+  LoanRs: 0, Capex: 2500000, CapexReleased: 2500000, CapexDue: 0, TenureYears: 3,
+  MinGuaranteePsf: 129.78, SdRate: 3, SdSchedule: '3 months rent', SecurityDeposit: 111706, SdDue: 111706,
+  SdReceived: 111706, SdBalance: 0, SdFutureDue: 0, CamSchedule: 'Monthly', CamDeposit: 0, CamDue: 0,
+  CamReceived: 0, CamBalance: 0, CamFutureDue: 0, RevenueSharePct: 0, FitoutPeriod: '45 days',
+  BrokerageTerms: '1 month rent', BrokerageDisbursal: 'On RCD', BrokerageRate: 100, BrokerageAmount: 37235,
+  BrokerageDue: 37235, BrokeragePaid: 0, BrokerageBalance: 37235, FutureBrokerage: 0, DealWith: 'Brand',
+  BillingRemarks: '', Category: 'F&B', HsnCode: '997212', PaymentTermsDays: 7, IgstApplicable: 'No',
+  EscMode: 'Annual', EscEveryYears: 3, InterestPct: 18, RsSlabsJson: '',
+  CamStartDate: '2026-04-05', NegotiationMode: '', NegotiatedMg: 0,
+  LessorName: 'Adhikaansh Realtors Pvt. Ltd.', LessorAddress: 'Sector 89, Gurugram',
+  LessorGstin: '06AABCA1234D1Z5', LessorPan: 'AABCA1234D',
+  LesseeName: 'Blue Tokai Coffee Roasters Pvt. Ltd.', LesseeAddress: 'New Delhi',
+  LesseeGstin: '07AABCU9603R1ZV', LesseePan: 'AABCU9603R',
+  StandardRemarks: 'Standard terms as per LOI', DetailedRemarks: 'Fitout 45 days; signage on facade approved',
+  BillingRemarks: 'Bill to registered address', RsSlabsJson: '[{"upto":5000000,"pct":5},{"upto":7000000,"pct":6},{"pct":7}]',
+  NegotiationMode: '', NfaClientName: 'Blue Tokai Coffee Roasters Pvt. Ltd.', NfaOpportunityId: 'OPP-2026-041',
+  NfaUnitStatus: 'Ready', NfaLeaseAgreementStatus: 'Signed', NfaSpaStatus: 'NA', NfaLeaseGuaranteeStatus: 'Received',
+  NfaLandlordDetails: 'Adhikaansh Realtors Pvt. Ltd.', NfaLessor: 'Adhikaansh Realtors Pvt. Ltd.',
+  NfaRentEscalation: '5% every year', NfaFitoutSupport: 'Rs 500/sqft', NfaFitoutChargesBorneBy: 'Brand',
+  NfaFitoutCamFreePeriod: '45 days', NfaFitoutRentFreePeriod: '45 days', NfaRentSdSchedule: '3 months rent',
+  NfaCamSdSchedule: 'NA', NfaStampDuty: 'Borne by lessee', NfaDeveloperScope: 'Bare shell with HVAC point',
+  NfaAdditionalTerms: 'Exclusivity for coffee category on ground floor', NfaSignage: 'One facade signage allowed',
+  NfaOccupancyClause: 'As per agreement', NfaOperationalTerms: 'Mall hours 10am-10pm',
+  NfaFitoutSupportCheque: 'CHQ 001234 - Rs 5,00,000', NfaLockinRentalCheque: 'CHQ 001235', NfaChequeReceivedDetails: 'Received 2026-03-25',
+  NfaPreparedBy: 'Anirudh Verma', NfaPreparedDate: '2026-02-10', NfaProposedBy: 'Leasing Team',
+  NfaHod: 'Rohit Malhotra', NfaApprovedBy1: 'Finance Head', NfaApprovedBy2: 'Director', NfaCostToCompany: 37235
+};
+function leaseSampleFor(x) {
+  if (x.f[1] in LEASE_SAMPLES) return LEASE_SAMPLES[x.f[1]];
+  const type = x.f[2];
+  if (type === 'date') return '2026-04-15';
+  if (type === 'dec' || type === 'int') return 0;
+  return '';
+}
+function leaseNoteFor(x) {
+  const type = x.f[2];
+  if (x.f[1] === 'IgstApplicable') return 'Optional · Yes/No — IGST instead of CGST+SGST';
+  if (x.f[1] === 'RsSlabsJson') return 'Optional · JSON slabs, e.g. [{"upto":5000000,"pct":5},{"upto":7000000,"pct":6},{"pct":7}]';
+  if (x.f[1] === 'EscMode') return 'Optional · Annual or Stepped';
+  if (x.f[1] === 'NegotiationMode') return 'Leave BLANK normally · InterimRate / RsOnly / HoldMg only while MG is still being negotiated';
+  if (type === 'date') return 'Optional · Date — YYYY-MM-DD or DD/MM/YYYY';
+  if (type === 'dec' || type === 'int') return 'Optional · Number (no ₹ symbol; commas OK)';
+  return 'Optional · Text';
+}
 const { logAudit, userName } = require('../lib/audit');
 const router = express.Router();
 
@@ -94,6 +151,7 @@ const TYPES = {
     module: 'companies', label: 'Company',
     headers: ['Company Name*', 'PAN', 'GSTIN'],
     sample: ['Adhikaansh Realtors Pvt. Ltd.', 'AABCA1234D', '06AABCA1234D1Z5'],
+    notes: ['MANDATORY · New company name — must NOT already exist in Company Master', 'Optional · 10-character PAN (AAAAA9999A)', 'Optional · 15-character GSTIN'],
     async ctx(pool) {
       const c = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Companies`);
       return { companies: makeLookup(c.recordset, 'Name'), seen: new Set() };
@@ -123,7 +181,8 @@ const TYPES = {
   assets: {
     module: 'assets', label: 'Project',
     headers: ['Project Name*', 'City', 'RERA No', 'OC Status', 'Landlord Name', 'Landlord Address', 'GSTIN', 'PAN', 'Bank Name', 'Bank Branch', 'Bank Account', 'IFSC', 'MICR'],
-    sample: ['Gems-2 Commercial, Sec-89', 'Gurugram', 'RERA-GGM-0000-2026', 'Received', 'Adhikaansh Realtors Pvt. Ltd.', 'Sector 89, Gurugram', '06AABCA1234D1Z5', 'AABCA1234D', 'HDFC Bank', 'Sector 29', '50100222333', 'HDFC0000123', ''],
+    sample: ['Gems-2 Commercial, Sec-89', 'Gurugram', 'RERA-GGM-0000-2026', 'Received', 'Adhikaansh Realtors Pvt. Ltd.', 'Sector 89, Gurugram', '06AABCA1234D1Z5', 'AABCA1234D', 'HDFC Bank', 'Sector 29', '50100222333', 'HDFC0000123', '110240001'],
+    notes: ['MANDATORY · New project name — must NOT already exist in Project Master', 'Optional · City', 'Optional · RERA registration number', 'Optional · e.g. Received / Applied', 'Optional · Landlord legal name (prints on invoices)', 'Optional · Landlord address', 'Optional · 15-character GSTIN', 'Optional · 10-character PAN', 'Optional · Bank for rent collection', 'Optional · Branch', 'Optional · Account number', 'Optional · IFSC (AAAA0XXXXXX)', 'Optional · MICR'],
     async ctx(pool) {
       const a = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Assets`);
       return { assets: makeLookup(a.recordset, 'Name'), seen: new Set() };
@@ -165,6 +224,7 @@ const TYPES = {
     module: 'blocks', label: 'Block',
     headers: ['Block Name*', 'Project*', 'Total Floors'],
     sample: ['Ground Floor', 'Gems-2 Commercial, Sec-89', 1],
+    notes: ['MANDATORY · Block/wing name — must not already exist in that project', 'MANDATORY · Must EXACTLY match a Project name in Project Master (copy-paste it)', 'Optional · Number, default 1'],
     async ctx(pool) {
       const [b, a] = await Promise.all([
         pool.request().query(`SELECT b.Id, b.Name, b.AssetId FROM ${SCHEMA}.Blocks b`),
@@ -200,7 +260,8 @@ const TYPES = {
   units: {
     module: 'units', label: 'Unit',
     headers: ['Unit Name*', 'Asset', 'Block', 'Floor', 'Builtup Area (sqft)', 'Carpet Area (sqft)', 'Covered Area (sqft)', 'Card Rate (Rs/sqft)', 'PLC', 'Unit Type', 'Owner', 'Customer (owner)', 'Status'],
-    sample: ['G-21', 'Gems-2 Commercial, Sec-89', '', 0, 1131.64, 905.31, 0, 145, '', 'Retail', '', '', 'Vacant'],
+    sample: ['G-21', 'Gems-2 Commercial, Sec-89', 'Ground Floor', 0, 1131.64, 905.31, 950.5, 145, 5, 'Retail', 'Smart World', 'Juhi Nagar', 'Vacant'],
+    notes: ['MANDATORY · New unit name — must NOT already exist in Unit Master', 'Optional · Must EXACTLY match a Project name in Project Master (auto-filled when you have only one project)', 'Optional · Must EXACTLY match a Block name of that project', 'Optional · Number', 'Optional · Number (sqft)', 'Optional · Number (sqft)', 'Optional · Number (sqft)', 'Optional · Standard asking rent ₹/sqft/month — prefills MG on new leases', 'Optional · Preferred-location charge (number)', 'Optional · e.g. Retail / F&B / Anchor', 'Optional · Free text', 'Optional · Must EXACTLY match a Customer name in Customer Master', 'Optional · Vacant / Leased / Blocked — default Vacant'],
     async ctx(pool) {
       const [u, a, b, c] = await Promise.all([
         pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Units`),
@@ -265,6 +326,7 @@ const TYPES = {
     module: 'brands', label: 'Brand',
     headers: ['Brand Name*', 'Company (lessee entity)', 'Category', 'Billing Email', 'GSTIN', 'PAN', 'Regular Address', 'Registered Address'],
     sample: ['Blue Tokai', 'Adhikaansh Realtors Pvt. Ltd.', 'F&B', 'accounts@bluetokai.com', '06AABCU9603R1ZV', 'AABCU9603R', 'Gurugram', 'New Delhi'],
+    notes: ['MANDATORY · New brand name — must NOT already exist in Brand Master', 'Optional · Must EXACTLY match a Company name in Company Master (copy-paste it)', 'Optional · e.g. F&B / Fashion / Anchor', 'Optional · Payment reminders go to this address', 'Optional · 15-character GSTIN', 'Optional · 10-character PAN (AAAAA9999A)', 'Optional · Operating address', 'Optional · Registered-office address'],
     async ctx(pool) {
       const [b, c] = await Promise.all([
         pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Brands`),
@@ -308,7 +370,8 @@ const TYPES = {
   brokers: {
     module: 'brands', label: 'Broker',
     headers: ['Broker Name*', 'Firm', 'Phone', 'Email', 'PAN', 'GSTIN', 'RERA No'],
-    sample: ['Rahul Khanna', 'RK Realty', '98100 00000', 'rahul@rkrealty.in', 'AAAPK1234K', '', ''],
+    sample: ['Rahul Khanna', 'RK Realty', '98100 00000', 'rahul@rkrealty.in', 'AAAPK1234K', '06AAAPK1234K1ZX', 'RERA-GGM-A-1234'],
+    notes: ['MANDATORY · New broker name — must NOT already exist in Broker Master', 'Optional · Firm/agency', 'Optional', 'Optional', 'Optional · 10-character PAN', 'Optional · 15-character GSTIN', 'Optional · RERA agent registration'],
     async ctx(pool) {
       const b = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Brokers`);
       return { brokers: makeLookup(b.recordset, 'Name'), seen: new Set() };
@@ -338,7 +401,8 @@ const TYPES = {
   customers: {
     module: 'units', label: 'Customer',
     headers: ['Customer Name*', 'Type', 'Phone', 'Email', 'PAN', 'GSTIN', 'Address', 'NRI (Yes/No)', 'Bank Name', 'Account No', 'IFSC', 'Remarks'],
-    sample: ['Juhi Nagar', 'Individual', '98100 11111', 'juhi@gmail.com', 'AAAPN1111A', '', 'Delhi', 'No', 'HDFC Bank', '50100222333', 'HDFC0000123', ''],
+    sample: ['Juhi Nagar', 'Individual', '98100 11111', 'juhi@gmail.com', 'AAAPN1111A', '07AAAPN1111A1ZX', 'Delhi', 'No', 'HDFC Bank', '50100222333', 'HDFC0000123', 'Unit K-06 owner'],
+    notes: ['MANDATORY · New customer name — must NOT already exist in Customer Master', 'Optional · Individual / Company', 'Optional', 'Optional', 'Optional · 10-character PAN', 'Optional · 15-character GSTIN', 'Optional', 'Optional · Yes/No — NRI investors attract 31.2% TDS on payouts', 'Optional · For disbursement NEFT file', 'Optional', 'Optional · IFSC (AAAA0XXXXXX)', 'Optional · Free text'],
     async ctx(pool) {
       const c = await pool.request().query(`SELECT Id, Name FROM ${SCHEMA}.Customers`);
       return { customers: makeLookup(c.recordset, 'Name'), seen: new Set() };
@@ -371,6 +435,7 @@ const TYPES = {
     module: 'sales', label: 'Sales entry',
     headers: ['Lease Code*', 'Month (YYYY-MM)*', 'Sales Amount*'],
     sample: ['LSE-0047', '2026-10', 5400000],
+    notes: ['MANDATORY · Must EXACTLY match a Lease code from the Leases page (e.g. LSE-0047)', 'MANDATORY · YYYY-MM (2026-10) or MM/YYYY (10/2026)', 'MANDATORY · Number — commas OK (54,00,000); re-uploading a month UPDATES it'],
     async ctx(pool) {
       const l = await pool.request().query(`SELECT Id, Code, RentalType, Status FROM ${SCHEMA}.Leases`);
       return { leases: makeLookup(l.recordset, 'Code'), seen: new Set() };
@@ -413,6 +478,7 @@ const TYPES = {
     module: 'collections', label: 'Receipt',
     headers: ['Invoice No*', 'Date (YYYY-MM-DD)*', 'Amount*', 'TDS %', 'Instrument (NEFT/Cheque)', 'Reference (UTR/Cheque No)'],
     sample: ['INV-0112', '2026-11-15', 43937.51, 10, 'NEFT', 'UTR9988776655'],
+    notes: ['MANDATORY · Must EXACTLY match an APPROVED invoice number from the Invoices page', 'MANDATORY · YYYY-MM-DD or DD/MM/YYYY', 'MANDATORY · Positive number', 'Optional · 0–30, default 0', 'Optional · NEFT or Cheque — default NEFT', 'Optional · UTR/cheque number — duplicates are rejected'],
     async ctx(pool) {
       const i = await pool.request().query(`SELECT Id, No, Total, DocStatus FROM ${SCHEMA}.Invoices`);
       const refs = await pool.request().query(`SELECT Ref FROM ${SCHEMA}.Collections WHERE Ref IS NOT NULL AND Ref <> ''`);
@@ -462,8 +528,25 @@ const TYPES = {
         ...LEASE_EXTRAS.map((x) => x.header)];
     },
     get sample() {
-      return ['Blue Tokai', 'K-06', '2026-04-01', '2029-03-31', 'MG', 129.78, 'PerSqFt', '', 20, 0, 5, 111706, 18, 36, '2026-04-15', '',
-        ...LEASE_EXTRAS.map((x) => (x.f[2] === 'date' ? '' : x.f[2] === 'str' ? '' : ''))];
+      return ['Blue Tokai', 'K-06', '2026-04-01', '2029-03-31', 'MG', 129.78, 'PerSqFt', 0, 20, 0, 5, 111706, 18, 36, '2026-04-15', 'Rahul Khanna',
+        ...LEASE_EXTRAS.map(leaseSampleFor)];
+    },
+    get notes() {
+      return [
+        'MANDATORY · Must EXACTLY match a Brand name in Brand Master (copy-paste it)',
+        'MANDATORY · Must EXACTLY match a VACANT unit name in Unit Master',
+        'MANDATORY · YYYY-MM-DD or DD/MM/YYYY',
+        'MANDATORY · Must be after Start Date',
+        'Optional · MG / MGvsRS / PureRS / VarRS — default MG',
+        'Needed unless PureRS · ₹/sqft/month or lumpsum per MG Basis',
+        'Optional · PerSqFt or Lumpsum — default PerSqFt',
+        'Needed for RS types · e.g. 7 for 7%',
+        'Optional · ₹/sqft/month', 'Optional · ₹/sqft/month',
+        'Optional · % per escalation', 'Optional · Security deposit ₹',
+        'Optional · default 18', 'Optional · months',
+        'Optional · Rent-free ends, billing starts (RCD)',
+        'Optional · Must EXACTLY match a Broker name in Broker Master',
+        ...LEASE_EXTRAS.map(leaseNoteFor)];
     },
     async ctx(pool) {
       const [b, u, br] = await Promise.all([
@@ -578,6 +661,7 @@ const TYPES = {
     module: 'investors', label: 'Investor unit',
     headers: ['Unit Name*', 'Investor Name*', 'Area %', 'Disburse %*', 'NRI (Yes/No)', 'Bank', 'Account No', 'IFSC'],
     sample: ['K-06', 'Juhi Nagar', 100, 100, 'No', 'HDFC Bank', '50100222333', 'HDFC0000123'],
+    notes: ['MANDATORY · Must EXACTLY match a Unit name in Unit Master; repeat the unit on several rows for joint investors', 'MANDATORY · Investor name', 'Optional · Ownership %', 'MANDATORY · All rows of one unit must total 100', 'Optional · Yes/No — NRI = 31.2% TDS', 'Optional', 'Optional', 'Optional · IFSC'],
     async ctx(pool) {
       const [u, iu] = await Promise.all([
         pool.request().query(`SELECT Id, Name, Floor FROM ${SCHEMA}.Units`),
@@ -638,7 +722,7 @@ const TYPES = {
 
 /* ── template/column definitions: the single source of truth for the UI ── */
 router.get('/defs', (req, res) => {
-  res.json(Object.entries(TYPES).map(([key, t]) => ({ key, label: t.label, headers: t.headers || [], sample: t.sample || [] })));
+  res.json(Object.entries(TYPES).map(([key, t]) => ({ key, label: t.label, headers: t.headers || [], sample: t.sample || [], notes: t.notes || [] })));
 });
 
 /* ── upload history ──────────────────────────────────────────────────── */
