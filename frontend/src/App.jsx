@@ -362,7 +362,7 @@ function ViewRouter(props) {
 }
 
 /* ===================== MASTERS (generic CRUD) ===================== */
-function MasterListPage({ entity, db, search, setSearch, setView, setModal, refresh, notify, canEditView, pendingDel, openInventoryUnit }) {
+function MasterListPage({ entity, db, search, setSearch, setView, setModal, refresh, notify, canEditView, pendingDel, openInventoryUnit, actingRole }) {
   const sc = MASTER_SCHEMA[entity];
   const pendingIds = new Set((pendingDel && pendingDel[entity]) || []);
   const [pageSize, setPageSize] = useState(20);
@@ -455,6 +455,7 @@ function MasterListPage({ entity, db, search, setSearch, setView, setModal, refr
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
       <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
         <SearchBox placeholder={`Search ${sc.sing.toLowerCase()}…`} value={search} onChange={setSearch} />
+        <ImportExportMenu view={entity} db={db} notify={notify} refresh={refresh} actingRole={actingRole} />
         <ListMeta shown={totalRows} total={(db[entity] || []).length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       {db[entity].length === 0 ? (
@@ -1128,7 +1129,7 @@ function UnitStatusPill({ s }) {
 }
 
 /* ===================== LEASES ===================== */
-function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify, canEditView, pendingDel }) {
+function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify, canEditView, pendingDel, actingRole }) {
   const pendingIds = new Set((pendingDel && pendingDel.leases) || []);
   const [pageSize, setPageSize] = useState(20);
   const [fStage, setFStage] = useState([]);
@@ -1156,6 +1157,7 @@ function LeasesPage({ db, search, setSearch, setView, setModal, refresh, notify,
         <MultiFilt label="All types" values={fType} onChange={setFType} options={RENTAL_TYPES.map(([v]) => v)} />
         <MultiFilt label="All stages" values={fStage} onChange={setFStage} options={LIFECYCLE_STAGES} />
         <MultiFilt label="Any approval" values={fAppr} onChange={setFAppr} options={['Pending', 'Approved', 'Rejected']} />
+        <ImportExportMenu view="leases" db={db} notify={notify} refresh={refresh} actingRole={actingRole} />
         <ListMeta shown={totalRows} total={db.leases.length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       <div className="tablewrap">
@@ -1852,7 +1854,7 @@ function HoldLeaseModal({ id, onClose, refresh, notify }) {
 }
 
 /* ===================== SALES ===================== */
-function SalesPage({ db, search, setSearch, setModal, notify, canEditView }) {
+function SalesPage({ db, search, setSearch, setModal, notify, canEditView, refresh, actingRole }) {
   const rsLeases = db.leases.filter((l) => ['PureRS', 'MGvsRS', 'VarRS'].includes(l.rentalType));
   const rows = db.sales.filter((s) => {
     const l = findById(db.leases, s.leaseId);
@@ -1862,7 +1864,10 @@ function SalesPage({ db, search, setSearch, setModal, notify, canEditView }) {
   return (
     <>
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
-      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}><SearchBox placeholder="Search sales by brand or month…" value={search} onChange={setSearch} /></div>
+      <div className="toolbar" style={!canEditView ? { marginTop: 14 } : undefined}>
+        <SearchBox placeholder="Search sales by brand or month…" value={search} onChange={setSearch} />
+        <ImportExportMenu view="sales" db={db} notify={notify} refresh={refresh} actingRole={actingRole} />
+      </div>
       <div className="tablewrap">
         {db.sales.length === 0 ? (
           rsLeases.length ? <EmptyState thing="sales entry" onAdd={canEditView ? () => setModal({ type: 'sales' }) : null} /> : <EmptyMini text="No revenue-share leases yet. Create a Pure-RS or MG-vs-RS lease first." />
@@ -1926,7 +1931,7 @@ function SalesFormModal({ db, onClose, refresh, notify }) {
 }
 
 /* ===================== INVOICES ===================== */
-function InvoicesPage({ db, search, setSearch, setView, filterVal, setFilterVal, setModal, notify, canEditView, pendingDel }) {
+function InvoicesPage({ db, search, setSearch, setView, filterVal, setFilterVal, setModal, notify, canEditView, pendingDel, refresh, actingRole }) {
   const pendingIds = new Set((pendingDel && pendingDel.invoices) || []);
   const [pageSize, setPageSize] = useState(20);
   const [fAppr, setFAppr] = useState([]);
@@ -1951,6 +1956,7 @@ function InvoicesPage({ db, search, setSearch, setView, filterVal, setFilterVal,
         <MultiFilt label="All types" values={fTypes} onChange={setFilterVal} options={['MG', 'RevShare', 'CAM', 'Utility', 'Adhoc']} />
         <MultiFilt label="Any status" values={fStatus} onChange={setFStatus} options={['Unpaid', 'Partial', 'Paid']} />
         <MultiFilt label="Any approval" values={fAppr} onChange={setFAppr} options={['Pending', 'Approved', 'Rejected']} />
+        <ImportExportMenu view="invoices" db={db} notify={notify} refresh={refresh} actingRole={actingRole} />
         <ListMeta shown={totalRows} total={db.invoices.length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       <div className="tablewrap">
@@ -2673,7 +2679,7 @@ function CollectionMasterPage({ db, search, setSearch }) {
   );
 }
 
-function CollectionsPage({ db, search, setSearch, setView, setModal, canEditView, pendingDel }) {
+function CollectionsPage({ db, search, setSearch, setView, setModal, canEditView, pendingDel, notify, refresh, actingRole }) {
   const pendingIds = new Set((pendingDel && pendingDel.collections) || []);
   const [pageSize, setPageSize] = useState(20);
   const [fAppr, setFAppr] = useState([]);
@@ -2694,6 +2700,7 @@ function CollectionsPage({ db, search, setSearch, setView, setModal, canEditView
         <SearchBox placeholder="Search collections…" value={search} onChange={setSearch} />
         <MultiFilt label="Any instrument" values={fMode} onChange={setFMode} options={['NEFT', 'Cheque']} />
         <MultiFilt label="Any approval" values={fAppr} onChange={setFAppr} options={['Pending', 'Approved', 'Rejected']} />
+        <ImportExportMenu view="collections" db={db} notify={notify} refresh={refresh} actingRole={actingRole} />
         <ListMeta shown={totalRows} total={db.collections.length} pageSize={pageSize} setPageSize={setPageSize} />
       </div>
       <div className="tablewrap">
@@ -2890,7 +2897,10 @@ function InvestorsPage({ db, search, setSearch, setModal, actingRole, refresh, n
         <Callout warn>You're acting as <b>{actingRole}</b> (maker). New/edited investor units need approval by an Admin, Finance or Portfolio Head.</Callout>
       )}
       {!canEditView && <Callout>You have view-only access to this section.</Callout>}
-      <div className="toolbar" style={{ marginTop: 14 }}><SearchBox placeholder="Search investor units…" value={search} onChange={setSearch} /></div>
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <SearchBox placeholder="Search investor units…" value={search} onChange={setSearch} />
+        <ImportExportMenu view="investors" db={db} notify={notify} refresh={refresh} actingRole={actingRole} />
+      </div>
       <div className="tablewrap">
         {db.investorUnits.length === 0 ? <EmptyState thing="investor unit" onAdd={canEditView ? () => setModal({ type: 'investor' }) : null} /> : (
           <table>
@@ -3734,8 +3744,9 @@ const IMPORT_TYPES = [
     sample: ['K-06', 'Juhi Nagar', 100, 100, 'No', 'HDFC Bank', '50100222333', 'HDFC0000123'] }
 ];
 
-function ImportCenterPage({ db, notify, actingRole, refresh }) {
-  const [sel, setSel] = React.useState(null);
+/* The per-type uploader + editable grid + history — used by the Import Center page
+   and by the Import/Export menu on every list page (inside a modal). */
+function ImportPanel({ t, notify, refresh, showHistory = true }) {
   const [rows, setRows] = React.useState(null);        // editable grid data, keyed by template header
   const [fileName, setFileName] = React.useState('');
   const [result, setResult] = React.useState(null);    // last validate/commit response
@@ -3743,23 +3754,12 @@ function ImportCenterPage({ db, notify, actingRole, refresh }) {
   const [history, setHistory] = React.useState([]);
   const [busy, setBusy] = React.useState('');
   const fileRef = React.useRef(null);
-  const types = IMPORT_TYPES.filter((t) => canEdit(actingRole, t.module));
   const keyOf = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9%]/g, '');
 
-  const loadHistory = async (t) => { try { setHistory(await api.importer.history(t ? t.key : '')); } catch (_) {} };
-  useEffect(() => { loadHistory(null); }, []); // eslint-disable-line
+  const loadHistory = async () => { try { setHistory(await api.importer.history(t.key)); } catch (_) {} };
+  useEffect(() => { setRows(null); setResult(null); setDirty(false); setFileName(''); if (showHistory) loadHistory(); }, [t.key]); // eslint-disable-line
 
-  const downloadTemplate = (t) => {
-    const ws = XLSX.utils.aoa_to_sheet([t.headers, t.sample]);
-    ws['!cols'] = t.headers.map((h) => ({ wch: Math.max(14, h.length + 2) }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, t.title.slice(0, 31));
-    XLSX.writeFile(wb, `Import_${t.key}_template.xlsx`);
-    notify(`Template downloaded — fill it and upload. Columns marked * are mandatory; the sample row shows the format (delete it before importing).`);
-  };
-
-  /* normalise an uploaded row's keys onto the template headers so the grid has fixed columns */
-  const normalise = (t, raw) => {
+  const normalise = (raw) => {
     const out = {};
     const entries = Object.entries(raw);
     t.headers.forEach((h) => {
@@ -3771,26 +3771,25 @@ function ImportCenterPage({ db, notify, actingRole, refresh }) {
     return out;
   };
 
-  const runCheck = async (t, data, fname) => {
+  const runCheck = async (data, fname) => {
     setBusy('validate');
     try { setResult(await api.importer.run(t.key, data, false, fname)); setDirty(false); }
     catch (e) { notify(e.message, true); }
     finally { setBusy(''); }
   };
 
-  const parseFile = async (t, file) => {
+  const parseFile = async (file) => {
     try {
       const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
       if (!raw.length) return notify('The file has no data rows under the header row.', true);
-      /* warn about mandatory columns missing from the file itself */
       const fileKeys = Object.keys(raw[0] || {}).map(keyOf);
       const missing = t.headers.filter((h) => h.endsWith('*') && !fileKeys.includes(keyOf(h)));
       if (missing.length) notify(`Mandatory column(s) missing in the file: ${missing.join(', ')} — download the template to get the exact headers.`, true);
-      const data = raw.map((r) => normalise(t, r));
+      const data = raw.map(normalise);
       setRows(data); setFileName(file.name); setResult(null);
-      await runCheck(t, data, file.name);
+      await runCheck(data, file.name);
     } catch (e) { notify(e.message, true); }
     finally { if (fileRef.current) fileRef.current.value = ''; }
   };
@@ -3803,11 +3802,11 @@ function ImportCenterPage({ db, notify, actingRole, refresh }) {
   const doImport = async () => {
     setBusy('commit');
     try {
-      const res = await api.importer.run(sel.key, rows, true, fileName);
+      const res = await api.importer.run(t.key, rows, true, fileName);
       setResult(res); setDirty(false);
-      notify(`${res.counts.imported} ${sel.title.toLowerCase()} row(s) imported${res.counts.errors ? `, ${res.counts.errors} rejected` : ''}.`);
-      await refresh(sel.refresh);
-      await loadHistory(sel);
+      notify(`${res.counts.imported} ${t.title.toLowerCase()} row(s) imported${res.counts.errors ? `, ${res.counts.errors} rejected` : ''}.`);
+      await refresh(t.refresh);
+      if (showHistory) await loadHistory();
     } catch (e) { notify(e.message, true); }
     finally { setBusy(''); }
   };
@@ -3821,10 +3820,199 @@ function ImportCenterPage({ db, notify, actingRole, refresh }) {
 
   return (
     <>
-      <Callout>Bulk-upload data from Excel in three safe steps: <b>1.</b> download the template · <b>2.</b> fill &amp; upload — every row is checked and <b>nothing is saved yet</b> · <b>3.</b> fix any red cells <b>right here in the preview</b>, re-check, and import — only clean rows go in. Leases, receipts and investor units still arrive as <b>Pending</b> for checker approval, and every import is recorded below and in Audit Logs.</Callout>
+      <div className="sub" style={{ marginBottom: 10 }}>Mandatory columns (*): <b>{t.headers.filter((h) => h.endsWith('*')).map((h) => h.replace(/\*$/, '')).join(', ')}</b> · Optional: {t.headers.filter((h) => !h.endsWith('*')).map((h) => h.replace(/ \(.*\)$/, '')).join(', ') || '—'}</div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className="btn btn-ghost" onClick={() => importTemplate(t, notify)}>⬇ Download template</button>
+        <label className="btn btn-teal" style={{ cursor: 'pointer' }}>
+          {busy === 'validate' && !rows ? 'Checking…' : '⬆ Upload filled Excel'}
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+            onChange={(e) => e.target.files[0] && parseFile(e.target.files[0])} />
+        </label>
+        {fileName && <span className="chip">{fileName}</span>}
+      </div>
+
+      {rows && result && (
+        <>
+          <div style={{ display: 'flex', gap: 8, margin: '14px 0 8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="chip">{result.counts.total} rows</span>
+            {result.counts.imported > 0 && <Pill color="teal">{result.counts.imported} imported</Pill>}
+            {!committed && result.counts.ok > 0 && <Pill color="green">{result.counts.ok} ready</Pill>}
+            {result.counts.errors > 0 && <Pill color="red">{result.counts.errors} with errors</Pill>}
+            {result.counts.skipped > 0 && <Pill color="grey">{result.counts.skipped} blank</Pill>}
+            {dirty && <button className="btn btn-ghost btn-sm" disabled={busy === 'validate'} onClick={() => runCheck(rows, fileName)}>{busy === 'validate' ? 'Checking…' : '⟳ Re-check edited rows'}</button>}
+            {!committed && !dirty && result.counts.ok > 0 && (
+              <button className="btn btn-teal btn-sm" disabled={busy === 'commit'} onClick={doImport}>
+                {busy === 'commit' ? 'Importing…' : `Import ${result.counts.ok} valid row(s)`}
+              </button>
+            )}
+          </div>
+          {dirty && <Callout>You have edited cells — click <b>Re-check edited rows</b> to validate again before importing.</Callout>}
+          {!committed && !dirty && result.counts.errors > 0 && <Callout warn>Red cells show exactly what is wrong — fix them here in the table (or in the file) and re-check. Rows still red when you import are <b>skipped</b>.</Callout>}
+
+          <div className="tablewrap" style={{ marginTop: 8, maxHeight: 440, overflow: 'auto' }}>
+            <table className="imp-table">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 46 }}>Row</th>
+                  <th style={{ minWidth: 86 }}>Status</th>
+                  {t.headers.map((h) => (
+                    <th key={h}>{h.endsWith('*') ? <>{h.slice(0, -1)}<span className="req">*</span></> : h}</th>
+                  ))}
+                  <th style={{ minWidth: 220 }}>Problem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0, 300).map((r, i) => {
+                  const res = resFor(i);
+                  const isErr = res && res.status === 'error';
+                  const errCol = isErr && res.col ? t.headers.find((h) => keyOf(h).includes(keyOf(res.col)) || keyOf(res.col).includes(keyOf(h))) : null;
+                  return (
+                    <tr key={i} className={isErr ? 'imp-err-row' : ''}>
+                      <td className="sub">#{i + 2}</td>
+                      <td>{dirty && !committed ? <Pill color="amber">edited</Pill> : stPill(res)}</td>
+                      {t.headers.map((h) => (
+                        <td key={h} className={errCol === h ? 'imp-err-cell' : ''}>
+                          <input className="imp-cell" value={r[h] ?? ''} disabled={!!committed}
+                            title={errCol === h ? res.message : undefined}
+                            onChange={(e) => editCell(i, h, e.target.value)} />
+                        </td>
+                      ))}
+                      <td className="sub" style={isErr ? { color: 'var(--red)' } : undefined}>
+                        {res && res.code ? <><span className="code">{res.code}</span> · </> : null}{res ? res.message : ''}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {rows.length > 300 && <div className="sub" style={{ padding: 8 }}>…and {rows.length - 300} more rows (they are validated and imported too — only the preview is capped).</div>}
+          </div>
+        </>
+      )}
+
+      {showHistory && (
+        <div style={{ marginTop: 16 }}>
+          <div className="sectlabel">Upload history — {t.title}</div>
+          {history.length === 0 ? <div className="sub">No imports yet for this type.</div> : (
+            <div className="tablewrap">
+              <table>
+                <thead><tr><th>When</th><th>File</th><th className="num">Rows</th><th className="num">Imported</th><th className="num">Rejected</th><th>By</th></tr></thead>
+                <tbody>
+                  {history.map((h) => (
+                    <tr key={h.id}>
+                      <td className="sub">{new Date(h.at).toLocaleString('en-GB')}</td>
+                      <td>{h.fileName || '—'}</td>
+                      <td className="num">{h.total}</td>
+                      <td className="num" style={{ color: 'var(--green)' }}>{h.imported}</td>
+                      <td className="num" style={{ color: h.rejected ? 'var(--red)' : undefined }}>{h.rejected}</td>
+                      <td className="sub">{h.by}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* shared template download */
+function importTemplate(t, notify) {
+  const ws = XLSX.utils.aoa_to_sheet([t.headers, t.sample]);
+  ws['!cols'] = t.headers.map((h) => ({ wch: Math.max(14, h.length + 2) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, t.title.slice(0, 31));
+  XLSX.writeFile(wb, `Import_${t.key}_template.xlsx`);
+  notify('Template downloaded — fill it and upload. Columns marked * are mandatory; the sample row shows the format (delete it before importing).');
+}
+
+/* ── Import / Export dropdown for list-page toolbars ───────────────────
+   view→import type + export column definitions. Export works for everyone
+   who can see the page; import items appear only with edit permission. */
+const EXPORT_DEFS = {
+  units:   { db: 'units',   cols: (d) => [['Code', 'code'], ['Unit', 'name'], ['Asset', (r) => nameOf(d.assets, r.assetId)], ['Floor', 'floor'], ['Builtup (sqft)', 'builtupArea'], ['Carpet (sqft)', 'carpetArea'], ['Card rate', 'cardRate'], ['Type', 'unitType'], ['Status', 'status']] },
+  brands:  { db: 'brands',  cols: () => [['Code', 'code'], ['Brand', 'name'], ['Category', 'category'], ['Billing email', 'email'], ['GSTIN', 'gstin'], ['PAN', 'panNo']] },
+  brokers: { db: 'brokers', cols: () => [['Code', 'code'], ['Broker', 'name'], ['Firm', 'firm'], ['Phone', 'phone'], ['Email', 'email'], ['PAN', 'panNo'], ['RERA', 'reraNo']] },
+  customers: { db: 'customers', cols: () => [['Code', 'code'], ['Customer', 'name'], ['Type', 'custType'], ['Phone', 'phone'], ['Email', 'email'], ['PAN', 'panNo'], ['GSTIN', 'gstin'], ['NRI', (r) => (r.nri ? 'Yes' : 'No')]] },
+  companies: { db: 'companies', cols: () => [['Code', 'code'], ['Company', 'name'], ['PAN', 'panNo'], ['GSTIN', 'gstin']] },
+  leases:  { db: 'leases',  cols: (d) => [['Code', 'code'], ['Brand', (r) => nameOf(d.brands, r.brandId)], ['Unit', (r) => nameOf(d.units, r.unitId)], ['Start', 'startDate'], ['End', 'endDate'], ['Type', 'rentalType'], ['MG', 'mg'], ['MG basis', 'mgBasis'], ['RS %', 'revSharePct'], ['CAM', 'cam'], ['Esc %', 'esc'], ['Deposit', 'deposit'], ['GST %', 'gst'], ['Stage', 'lifecycleStage'], ['Approval', 'docStatus']] },
+  sales:   { db: 'sales',   cols: (d) => [['Lease', (r) => { const l = findById(d.leases, r.leaseId); return l ? l.code : r.leaseId; }], ['Month', 'ym'], ['Sales', 'amount']] },
+  invoices: { db: 'invoices', cols: (d) => [['Invoice', 'no'], ['Type', 'type'], ['Brand', (r) => nameOf(d.brands, r.brandId)], ['Unit', (r) => nameOf(d.units, r.unitId)], ['Month', 'ym'], ['Due', 'dueDate'], ['Taxable', 'amount'], ['GST', 'gstAmt'], ['Total', 'total'], ['Status', 'status'], ['Approval', 'docStatus']] },
+  collections: { db: 'collections', cols: (d) => [['Receipt', 'no'], ['Invoice', (r) => { const i = findById(d.invoices, r.invoiceId); return i ? i.no : ''; }], ['Date', 'date'], ['Amount', 'amount'], ['TDS', 'tdsAmt'], ['Instrument', 'instrument'], ['Ref', 'ref'], ['Approval', 'docStatus']] },
+  investors: { db: 'investorUnits', cols: (d) => [['Code', 'code'], ['Unit', (r) => nameOf(d.units, r.unitId)], ['Investors', (r) => (r.investors || []).map((x) => `${x.name} (${x.disbursePct}%)`).join('; ')], ['Status', 'status']] }
+};
+const VIEW_IMPORT_KEY = { units: 'units', brands: 'brands', brokers: 'brokers', customers: 'customers', leases: 'leases', sales: 'sales', collections: 'collections', investors: 'investorunits' };
+
+function ImportExportMenu({ view, db, notify, refresh, actingRole }) {
+  const [open, setOpen] = React.useState(false);
+  const [modal, setModal] = React.useState(false);
+  const ref = React.useRef(null);
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const exp = EXPORT_DEFS[view];
+  const impType = IMPORT_TYPES.find((t) => t.key === VIEW_IMPORT_KEY[view]);
+  const canImport = impType && canEdit(actingRole, impType.module);
+  if (!exp && !impType) return null;
+
+  const matrix = () => {
+    const cols = exp.cols(db);
+    const rows = db[exp.db] || [];
+    return [cols.map(([h]) => h), ...rows.map((r) => cols.map(([, k]) => (typeof k === 'function' ? k(r) : r[k]) ?? ''))];
+  };
+  const stamp = () => new Date().toISOString().slice(0, 10);
+  const exportCSV = () => { download(`${view}_${stamp()}.csv`, toCSV(matrix())); notify(`Exported ${(db[exp.db] || []).length} row(s) to CSV.`); setOpen(false); };
+  const exportXLSX = () => {
+    const m = matrix();
+    const ws = XLSX.utils.aoa_to_sheet(m);
+    ws['!cols'] = m[0].map((h) => ({ wch: Math.max(12, String(h).length + 2) }));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, view.slice(0, 31));
+    XLSX.writeFile(wb, `${view}_${stamp()}.xlsx`);
+    notify(`Exported ${(db[exp.db] || []).length} row(s) to Excel.`); setOpen(false);
+  };
+  const item = (icon, label, fn) => <a className="iem-item" onClick={fn}><span className="iem-ico">{icon}</span>{label}</a>;
+
+  return (
+    <div className="iem" ref={ref}>
+      <button type="button" className="btn btn-ghost" onClick={() => setOpen((o) => !o)}>⇅ Import / Export</button>
+      {open && (
+        <div className="iem-pop">
+          {exp && <><div className="iem-head">Export</div>
+            {item('⬇', 'Export CSV', exportCSV)}
+            {item('⬇', 'Export Excel', exportXLSX)}</>}
+          {canImport && <><div className="iem-head">Import</div>
+            {item('⬆', 'Import Excel / CSV…', () => { setModal(true); setOpen(false); })}
+            <div className="iem-head">Templates</div>
+            {item('⬇', 'Download Excel template', () => { importTemplate(impType, notify); setOpen(false); })}
+            {item('🕑', 'Import history', () => { setModal(true); setOpen(false); })}</>}
+        </div>
+      )}
+      {modal && impType && (
+        <Modal title={`${impType.icon} Import ${impType.title}`} xwide onClose={() => setModal(false)}
+          footer={<button className="btn btn-teal" onClick={() => setModal(false)}>Close</button>}>
+          <ImportPanel t={impType} notify={notify} refresh={refresh} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ImportCenterPage({ db, notify, actingRole, refresh }) {
+  const [sel, setSel] = React.useState(null);
+  const [allHistory, setAllHistory] = React.useState([]);
+  const types = IMPORT_TYPES.filter((t) => canEdit(actingRole, t.module));
+  useEffect(() => { (async () => { try { setAllHistory(await api.importer.history('')); } catch (_) {} })(); }, []); // eslint-disable-line
+
+  return (
+    <>
+      <Callout>Bulk-upload data from Excel in three safe steps: <b>1.</b> download the template · <b>2.</b> fill &amp; upload — every row is checked and <b>nothing is saved yet</b> · <b>3.</b> fix any red cells <b>right here in the preview</b>, re-check, and import — only clean rows go in. The same importer is available on each page's <b>⇅ Import / Export</b> button. Leases, receipts and investor units arrive as <b>Pending</b> for checker approval; every import is recorded below and in Audit Logs.</Callout>
       <div className="imp-grid">
         {types.map((t) => (
-          <div key={t.key} className={`imp-card ${sel?.key === t.key ? 'sel' : ''}`} onClick={() => { setSel(t); setRows(null); setResult(null); setDirty(false); loadHistory(t); }}>
+          <div key={t.key} className={`imp-card ${sel?.key === t.key ? 'sel' : ''}`} onClick={() => setSel(t)}>
             <div className="imp-ico">{t.icon}</div>
             <h4>{t.title}</h4>
             <p>{t.desc}</p>
@@ -3834,101 +4022,34 @@ function ImportCenterPage({ db, notify, actingRole, refresh }) {
       {sel && (
         <div className="card" style={{ marginTop: 16, padding: 16 }}>
           <h3 style={{ margin: '0 0 4px' }}>{sel.icon} Import {sel.title}</h3>
-          <div className="sub" style={{ marginBottom: 10 }}>Mandatory columns (*): <b>{sel.headers.filter((h) => h.endsWith('*')).map((h) => h.replace(/\*$/, '')).join(', ')}</b> · Optional: {sel.headers.filter((h) => !h.endsWith('*')).map((h) => h.replace(/ \(.*\)$/, '')).join(', ') || '—'}</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button className="btn btn-ghost" onClick={() => downloadTemplate(sel)}>⬇ Download template</button>
-            <label className="btn btn-teal" style={{ cursor: 'pointer' }}>
-              {busy === 'validate' && !rows ? 'Checking…' : '⬆ Upload filled Excel'}
-              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
-                onChange={(e) => e.target.files[0] && parseFile(sel, e.target.files[0])} />
-            </label>
-            {fileName && <span className="chip">{fileName}</span>}
-          </div>
-
-          {rows && result && (
-            <>
-              <div style={{ display: 'flex', gap: 8, margin: '14px 0 8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <span className="chip">{result.counts.total} rows</span>
-                {result.counts.imported > 0 && <Pill color="teal">{result.counts.imported} imported</Pill>}
-                {!committed && result.counts.ok > 0 && <Pill color="green">{result.counts.ok} ready</Pill>}
-                {result.counts.errors > 0 && <Pill color="red">{result.counts.errors} with errors</Pill>}
-                {result.counts.skipped > 0 && <Pill color="grey">{result.counts.skipped} blank</Pill>}
-                {dirty && <button className="btn btn-ghost btn-sm" disabled={busy === 'validate'} onClick={() => runCheck(sel, rows, fileName)}>{busy === 'validate' ? 'Checking…' : '⟳ Re-check edited rows'}</button>}
-                {!committed && !dirty && result.counts.ok > 0 && (
-                  <button className="btn btn-teal btn-sm" disabled={busy === 'commit'} onClick={doImport}>
-                    {busy === 'commit' ? 'Importing…' : `Import ${result.counts.ok} valid row(s)`}
-                  </button>
-                )}
-              </div>
-              {dirty && <Callout>You have edited cells — click <b>Re-check edited rows</b> to validate again before importing.</Callout>}
-              {!committed && !dirty && result.counts.errors > 0 && <Callout warn>Red cells show exactly what is wrong — fix them here in the table (or in the file) and re-check. Rows still red when you import are <b>skipped</b>.</Callout>}
-
-              <div className="tablewrap" style={{ marginTop: 8, maxHeight: 440, overflow: 'auto' }}>
-                <table className="imp-table">
-                  <thead>
-                    <tr>
-                      <th style={{ minWidth: 46 }}>Row</th>
-                      <th style={{ minWidth: 86 }}>Status</th>
-                      {sel.headers.map((h) => (
-                        <th key={h}>{h.endsWith('*') ? <>{h.slice(0, -1)}<span className="req">*</span></> : h}</th>
-                      ))}
-                      <th style={{ minWidth: 220 }}>Problem</th>
+          <ImportPanel t={sel} notify={notify} refresh={refresh} />
+        </div>
+      )}
+      {!sel && (
+        <div className="card" style={{ marginTop: 16, padding: 16 }}>
+          <h3 style={{ margin: '0 0 8px' }}>Upload history — all types</h3>
+          {allHistory.length === 0 ? <div className="sub">No imports yet.</div> : (
+            <div className="tablewrap">
+              <table>
+                <thead><tr><th>When</th><th>Type</th><th>File</th><th className="num">Rows</th><th className="num">Imported</th><th className="num">Rejected</th><th>By</th></tr></thead>
+                <tbody>
+                  {allHistory.map((h) => (
+                    <tr key={h.id}>
+                      <td className="sub">{new Date(h.at).toLocaleString('en-GB')}</td>
+                      <td><Pill color="grey">{(IMPORT_TYPES.find((t) => t.key === h.type) || { title: h.type }).title}</Pill></td>
+                      <td>{h.fileName || '—'}</td>
+                      <td className="num">{h.total}</td>
+                      <td className="num" style={{ color: 'var(--green)' }}>{h.imported}</td>
+                      <td className="num" style={{ color: h.rejected ? 'var(--red)' : undefined }}>{h.rejected}</td>
+                      <td className="sub">{h.by}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 300).map((r, i) => {
-                      const res = resFor(i);
-                      const isErr = res && res.status === 'error';
-                      const errCol = isErr && res.col ? sel.headers.find((h) => keyOf(h).includes(keyOf(res.col)) || keyOf(res.col).includes(keyOf(h))) : null;
-                      return (
-                        <tr key={i} className={isErr ? 'imp-err-row' : ''}>
-                          <td className="sub">#{i + 2}</td>
-                          <td>{dirty && !committed ? <Pill color="amber">edited</Pill> : stPill(res)}</td>
-                          {sel.headers.map((h) => (
-                            <td key={h} className={errCol === h ? 'imp-err-cell' : ''}>
-                              <input className="imp-cell" value={r[h] ?? ''} disabled={!!committed}
-                                title={errCol === h ? res.message : undefined}
-                                onChange={(e) => editCell(i, h, e.target.value)} />
-                            </td>
-                          ))}
-                          <td className="sub" style={isErr ? { color: 'var(--red)' } : undefined}>
-                            {res && res.code ? <><span className="code">{res.code}</span> · </> : null}{res ? res.message : ''}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {rows.length > 300 && <div className="sub" style={{ padding: 8 }}>…and {rows.length - 300} more rows (they are validated and imported too — only the preview is capped).</div>}
-              </div>
-            </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
-
-      <div className="card" style={{ marginTop: 16, padding: 16 }}>
-        <h3 style={{ margin: '0 0 8px' }}>Upload history{sel ? ` — ${sel.title}` : ''}</h3>
-        {history.length === 0 ? <div className="sub">No imports yet{sel ? ' for this type' : ''}.</div> : (
-          <div className="tablewrap">
-            <table>
-              <thead><tr><th>When</th><th>Type</th><th>File</th><th className="num">Rows</th><th className="num">Imported</th><th className="num">Rejected</th><th>By</th></tr></thead>
-              <tbody>
-                {history.map((h) => (
-                  <tr key={h.id}>
-                    <td className="sub">{new Date(h.at).toLocaleString('en-GB')}</td>
-                    <td><Pill color="grey">{(IMPORT_TYPES.find((t) => t.key === h.type) || { title: h.type }).title}</Pill></td>
-                    <td>{h.fileName || '—'}</td>
-                    <td className="num">{h.total}</td>
-                    <td className="num" style={{ color: 'var(--green)' }}>{h.imported}</td>
-                    <td className="num" style={{ color: h.rejected ? 'var(--red)' : undefined }}>{h.rejected}</td>
-                    <td className="sub">{h.by}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </>
   );
 }

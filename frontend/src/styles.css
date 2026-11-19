@@ -718,3 +718,13 @@ tbody tr{transition:background .12s}
 .imp-cell:disabled{color:var(--muted)}
 .imp-err-row td{background:#FFF6F6}
 .imp-err-cell .imp-cell{border-color:var(--red);background:#FFECEC}
+
+/* ── v4.7: import/export menu on list pages ── */
+.iem{position:relative;display:inline-block}
+.iem-pop{position:absolute;top:calc(100% + 4px);right:0;z-index:70;min-width:230px;background:#fff;
+  border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(15,26,48,.14);padding:6px 0}
+.iem-head{padding:7px 14px 4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint)}
+.iem-head + .iem-head{border-top:1px solid var(--line)}
+.iem-item{display:flex;align-items:center;gap:9px;padding:7px 14px;font-size:13px;color:var(--ink);cursor:pointer}
+.iem-item:hover{background:#F4F7FB;color:var(--teal)}
+.iem-ico{width:16px;text-align:center}
